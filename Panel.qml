@@ -180,11 +180,13 @@ Panel {
 
   // ------------------------------------------------------------- history
 
-  // The readings of the last 24 hours, oldest first, for the terminal skin's
-  // sparkline and trend arrows. Kept across shell restarts in one private file
-  // (bin/inair-history, ~/.local/state/priard.inair/history.json) so that an
-  // update does not wipe the trend, and tied to one locker: moving to another
-  // starts over, so a trend never spans two streets.
+  // The readings of the last 24 hours for the locker being read, oldest
+  // first, for the sparkline, the plain skin's chart and the trend arrows.
+  // Kept across shell restarts in one private file (bin/inair-history,
+  // ~/.local/state/priard.inair/history.json), which holds the few lockers
+  // used most recently: a look at another locker starts that locker's own
+  // trend and leaves this one's in the file for when you come back. A trend
+  // never spans two streets.
   property var history: []
   readonly property int historyLimit: 320
   readonly property double historyWindow: 24 * 3600 * 1000
@@ -864,6 +866,14 @@ Panel {
     command: ["/usr/bin/python3", "-I", "-S", root.historyHelper, "read"]
     clearEnvironment: true
     environment: root.helperEnvironment
+    stdinEnabled: true
+
+    // Which locker to read goes on stdin like everything else here: a code in
+    // argv would sit in /proc/<pid>/cmdline for anyone to see.
+    onStarted: {
+      write(historyReadProc.code + "\n")
+      stdinEnabled = false
+    }
 
     stdout: SplitParser {
       splitMarker: ""
@@ -880,6 +890,7 @@ Panel {
     stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
 
     onExited: function(code, status) {
+      historyReadProc.stdinEnabled = true
       var raw = code === 0 ? historyReadProc.buffer : "{}"
       historyReadProc.buffer = ""
       root.adoptStoredHistory(raw, historyReadProc.code)

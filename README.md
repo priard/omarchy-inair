@@ -190,7 +190,8 @@ version shows, and PM2.5 is drawn large in square pixel digits.
   cleared. Only those two values are stored, so a cell can now and then differ
   from the level InPost showed at the time. The readings are kept in a small
   private file (see below), so a shell restart or a plugin update does not
-  wipe the trend. Switching to another locker starts a new one.
+  wipe the trend. Each locker has its own trend, and the four used most
+  recently are kept, so a look at another locker does not cost you yours.
 - **Street weather**, in the same block cells as the meters. Temperature is a
   heat strip on a −20…40 °C scale, each cell coloured by the temperature it
   stands for, from cold blue to hot red. Humidity fills 0–100%. Pressure is a
@@ -263,16 +264,17 @@ Files:
 |---|---|---|
 | `~/.config/omarchy/shell.json` | its own entry only | settings, and the resolved locker id |
 | `~/.local/state/omarchy/settings/weather.json` | read only | Omarchy's location, never modified |
-| `~/.local/state/priard.inair/history.json` | read and write | the trend: the locker code and its readings from the last 24 hours |
+| `~/.local/state/priard.inair/history.json` | read and write | the trend: for the four lockers used most recently, their codes and readings from the last 24 hours |
 
-The trend file is the only file the plugin creates. It is small (at most
-320 readings, capped at 64 KiB) and drops anything older than a day on every
-write. Because the locker code says roughly where you are, it is private
-from the moment it is created: mode 0600 in a 0700 directory. All access goes
-through `bin/inair-history`, which refuses a symlink, a FIFO, a file someone
-else owns or one that is too large, and writes through a fresh temporary file
-that is renamed over the old one. The data travels to it on stdin, never on
-the command line.
+The trend file is the only file the plugin creates. It is small (at most four
+lockers of 320 readings each, capped at 256 KiB) and drops anything older than
+a day on every write; when a fifth locker comes along, the one read least
+recently goes. Because locker codes say roughly where you are and where you
+looked, it is private from the moment it is created: mode 0600 in a 0700
+directory. All access goes through `bin/inair-history`, which refuses a
+symlink, a FIFO, a file someone else owns or one that is too large, and writes
+through a fresh temporary file that is renamed over the old one. Readings and
+locker codes travel to it on stdin, never on the command line.
 
 ## Remove
 
@@ -286,8 +288,8 @@ configuration to clean up, and no privileges were granted, so none need
 revoking.
 
 One file survives removal: the trend history,
-`~/.local/state/priard.inair/history.json`, which holds a locker code and a
-day of readings. Delete it, and its directory, yourself if you want no trace
+`~/.local/state/priard.inair/history.json`, which holds up to four locker
+codes and a day of readings for each. Delete it, and its directory, yourself if you want no trace
 left:
 
 ```bash

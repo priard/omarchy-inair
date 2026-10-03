@@ -1,14 +1,22 @@
 #!/usr/bin/python3 -I
-"""Keep the terminal skin's PM2.5 trend across shell restarts, and nothing else.
+"""Keep the PM2.5 trend across shell restarts, and nothing else.
 
 One small file, ~/.local/state/priard.inair/history.json, owned by this plugin:
-the locker code and the readings of the last 24 hours, so a restart after an
-update does not wipe the sparkline. The code names a locker and so roughly a
-place; the file is private (0600 in a 0700 directory) from the moment it is
-created.
+the readings of the last 24 hours for each of the few lockers used most
+recently, so a restart after an update does not wipe the trend, and a look at
+another locker does not wipe the one you came back to. Locker codes name
+places, so the file is private (0600 in a 0700 directory) from the moment it
+is created, and a code never travels on the command line: both commands take
+their input on stdin.
 
-    inair-history read     prints the stored document, or {} if there is none
-    inair-history write    reads a document on stdin and stores it
+    inair-history read     stdin: a locker code. Prints {"code", "samples"}
+                           for that locker, or {} if nothing is stored.
+    inair-history write    stdin: {"code", "samples"} for one locker. Merged
+                           into the file; the other lockers are kept.
+
+On disk: {"version": 2, "lockers": {CODE: [[at, pm25, pm10, temperature,
+humidity, pressure], ...]}}, at most MAX_LOCKERS of them, the least recently
+read one dropped first. A version 1 file (one locker) is taken over as is.
 
 Both directions go through the same schema check, and what is stored is
 re-serialized from the parsed values, never the bytes that arrived. Paths are
@@ -31,8 +39,10 @@ import time
 
 STATE_PARTS = (".local", "state", "priard.inair")
 STATE_FILE = "history.json"
-MAX_BYTES = 65536
+MAX_BYTES = 262144          # the file: a few lockers' worth of compact samples
+MAX_INPUT = 65536           # one locker's samples as the shell sends them
 MAX_SAMPLES = 320
+MAX_LOCKERS = 4
 MAX_AGE_MS = 24 * 3600 * 1000
 FIELDS = ("pm25", "pm10", "temperature", "humidity", "pressure")
 CODE = re.compile(r"[A-Za-z0-9_-]{1,32}")
@@ -151,73 +161,139 @@ RANGES = {
 }
 
 
-def clean(document):
-    """Rebuild a document from scratch out of what survives the schema.
+def clean_samples(samples, now):
+    """Rebuild a list of samples out of what survives the schema.
 
-    Anything that does not fit is dropped: a sample with a bad timestamp, a
-    field out of range, a code outside the locker alphabet. Samples older than
-    a day, or from the future, go too, and at most MAX_SAMPLES are kept.
+    Accepts the shell's objects ({"at", "pm25", ...}) and the file's compact
+    rows ([at, pm25, ...]) alike. A sample with a bad timestamp is dropped, a
+    field out of range becomes null, and samples older than a day or from the
+    future go. At most MAX_SAMPLES are kept, newest last.
     """
-    if not isinstance(document, dict):
-        return {}
-    code = document.get("code")
-    if not isinstance(code, str) or not CODE.fullmatch(code):
-        return {}
-    samples = document.get("samples")
     if not isinstance(samples, list):
-        return {}
-
-    now = int(time.time() * 1000)
+        return []
     out = []
     for item in samples[: MAX_SAMPLES * 2]:
-        if not isinstance(item, dict):
+        if isinstance(item, dict):
+            at = item.get("at")
+            values = [item.get(field) for field in FIELDS]
+        elif isinstance(item, list) and len(item) == len(FIELDS) + 1:
+            at = item[0]
+            values = item[1:]
+        else:
             continue
-        at = item.get("at")
         if isinstance(at, bool) or not isinstance(at, int):
             continue
         if not now - MAX_AGE_MS <= at <= now + 60000:
             continue
-        sample = {"at": at}
-        for field in FIELDS:
+        row = [at]
+        for field, value in zip(FIELDS, values):
             low, high = RANGES[field]
-            sample[field] = finite(item.get(field), low, high)
-        out.append(sample)
+            row.append(finite(value, low, high))
+        out.append(row)
+    out.sort(key=lambda r: r[0])
+    return out[-MAX_SAMPLES:]
 
-    out.sort(key=lambda s: s["at"])
-    return {"version": 1, "code": code, "samples": out[-MAX_SAMPLES:]}
+
+def valid_code(code):
+    return isinstance(code, str) and CODE.fullmatch(code) is not None
+
+
+def clean_store(document, now):
+    """The stored lockers, as {code: rows}, from a version 1 or 2 document."""
+    lockers = {}
+    if not isinstance(document, dict):
+        return lockers
+    if document.get("version") == 1 or "code" in document:
+        if valid_code(document.get("code")):
+            lockers[document["code"]] = clean_samples(document.get("samples"), now)
+    else:
+        stored = document.get("lockers")
+        if isinstance(stored, dict):
+            for code in list(stored)[: MAX_LOCKERS * 4]:
+                if valid_code(code):
+                    lockers[code] = clean_samples(stored[code], now)
+    return {code: rows for code, rows in lockers.items() if rows}
+
+
+def newest_first(lockers):
+    return sorted(lockers, key=lambda code: lockers[code][-1][0], reverse=True)
+
+
+def as_objects(rows):
+    return [dict(zip(("at",) + FIELDS, row)) for row in rows]
 
 
 def encode(document):
     return json.dumps(document, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
+def read_stdin(limit):
+    data = sys.stdin.buffer.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError("input larger than %d bytes" % limit)
+    return data.decode("utf-8", "strict")
+
+
+def load_store(dirfd, now):
+    raw = read_bounded(dirfd)
+    if raw is None:
+        return {}
+    return clean_store(json.loads(raw.decode("utf-8", "strict")), now)
+
+
 def cmd_read():
+    code = read_stdin(64).strip()
+    if not valid_code(code):
+        raise ValueError("invalid locker code")
     try:
         dirfd = open_state_dir(create=False)
     except FileNotFoundError:
         sys.stdout.write("{}")
         return 0
     try:
-        raw = read_bounded(dirfd)
+        lockers = load_store(dirfd, int(time.time() * 1000))
     finally:
         os.close(dirfd)
-    if raw is None:
+    if code not in lockers:
         sys.stdout.write("{}")
         return 0
-    sys.stdout.write(encode(clean(json.loads(raw.decode("utf-8", "strict")))).decode("utf-8"))
+    sys.stdout.write(encode({"version": 2, "code": code,
+                             "samples": as_objects(lockers[code])}).decode("utf-8"))
     return 0
 
 
 def cmd_write():
-    payload = sys.stdin.buffer.read(MAX_BYTES + 1)
-    if len(payload) > MAX_BYTES:
-        raise ValueError("input larger than %d bytes" % MAX_BYTES)
-    document = clean(json.loads(payload.decode("utf-8", "strict")))
-    if not document:
+    document = json.loads(read_stdin(MAX_INPUT))
+    if not isinstance(document, dict) or not valid_code(document.get("code")):
         raise ValueError("input does not match the history schema")
+    now = int(time.time() * 1000)
+    rows = clean_samples(document.get("samples"), now)
+
     dirfd = open_state_dir(create=True)
     try:
-        write_atomic(dirfd, encode(document))
+        # Read, merge, write. Two shells writing at once can lose one of the
+        # two updates; each carries the full history of its locker, so the
+        # next write restores it. The file itself is never torn.
+        try:
+            lockers = load_store(dirfd, now)
+        except (PermissionError, ValueError) as exc:
+            # A refused or corrupt file is not overwritten silently into
+            # something else; say why and leave it alone.
+            raise ValueError("existing history refused: %s" % exc)
+        if rows:
+            lockers[document["code"]] = rows
+        else:
+            lockers.pop(document["code"], None)
+        keep = newest_first(lockers)[:MAX_LOCKERS]
+        out = {"version": 2, "lockers": {code: lockers[code] for code in keep}}
+        data = encode(out)
+        # Should a day of four lockers ever outgrow the cap, drop the oldest
+        # locker rather than fail every write from then on.
+        while len(data) > MAX_BYTES and len(keep) > 1:
+            keep = keep[:-1]
+            out = {"version": 2, "lockers": {code: lockers[code] for code in keep}}
+            data = encode(out)
+        write_atomic(dirfd, data)
     finally:
         os.close(dirfd)
     return 0
@@ -232,7 +308,7 @@ def main():
         return cmd_read()
     if command == "write":
         return cmd_write()
-    sys.stderr.write("usage: inair-history read | write\n")
+    sys.stderr.write("usage: inair-history read | write   (input on stdin)\n")
     return 2
 
 

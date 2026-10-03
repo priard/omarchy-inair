@@ -4,6 +4,22 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — 2026-10-04
+
+### Changed
+
+- **Each locker keeps its own trend.** The history file now holds the four
+  lockers used most recently instead of one, so a look at another locker no
+  longer wipes the trend of the one you come back to; when a fifth comes
+  along, the one read least recently is dropped. The file moves to a compact
+  version 2 format (capped at 256 KiB); a version 1 file is taken over on the
+  first write without losing its readings.
+- `bin/inair-history read` takes the locker code on stdin, like `write` takes
+  the readings: a code on the command line would be visible in
+  `/proc/<pid>/cmdline`.
+- A write now refuses to touch a history file it cannot read safely (a
+  symlink, a foreign or oversized file) instead of replacing it.
+
 ## [0.6.0] — 2026-10-04
 
 ### Added
@@ -170,6 +186,7 @@ Last release under the name **InPost Air** (`priard.inpost-air`).
   validated arguments. Nothing written outside the plugin's `shell.json`
   entry.
 
+[0.7.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.7.0
 [0.6.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.6.0
 [0.5.1]: https://github.com/priard/omarchy-inair/releases/tag/v0.5.1
 [0.5.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.5.0
