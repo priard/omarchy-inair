@@ -500,6 +500,224 @@ Item {
       }
     }
 
+    // ---- PM2.5 over the last hours, as an area chart. The same history as
+    // the terminal skin's sparkline (kept across restarts, up to a day), drawn
+    // the plain skin's way: each stretch of the curve in the colour of the
+    // index it stood at, a dashed line at the legal norm, a pulsing dot for
+    // "now", and the value and time under the pointer.
+    Item {
+      id: trendBox
+      x: column.inset
+      width: column.innerWidth
+      height: Style.space(92)
+      visible: trend.values.length >= 2
+
+      readonly property int cells: 48
+      readonly property real norm: 25
+      readonly property var trend: view.panel
+        ? Model.trendBuckets(view.panel.history, "pm25", cells, Date.now(),
+                             view.panel.historyWindow, ["pm10"])
+        : ({ values: [], extra: {}, span: 0, start: 0, end: 0 })
+      readonly property var levels: Model.trendLevels(trend, view.scale)
+      readonly property real peak: {
+        var hi = norm
+        for (var i = 0; i < trend.values.length; i++)
+          if (trend.values[i] !== null && trend.values[i] > hi) hi = trend.values[i]
+        return hi * 1.15
+      }
+      property int hoverIndex: -1
+
+      function colorAt(i) {
+        var level = levels[i] || ""
+        if (level === "") return view.levelColor
+        return view.panel ? view.panel.ink(Model.levelInfo(level, view.scale).color)
+                          : Model.levelInfo(level, view.scale).color
+      }
+      function xAt(i) {
+        return trend.values.length < 2 ? 0 : i / (trend.values.length - 1) * chart.width
+      }
+      function yAt(v) {
+        return chart.height - Math.max(0, Math.min(1, (v || 0) / peak)) * (chart.height - 4)
+      }
+
+      onTrendChanged: chart.requestPaint()
+      onLevelsChanged: chart.requestPaint()
+
+      Text {
+        id: trendTitle
+        textFormat: Text.PlainText
+        text: "PM2.5 TREND"
+        color: view.dim
+        font.family: view.fontFamily
+        font.pixelSize: Style.font.caption
+        font.letterSpacing: 1
+      }
+
+      // The span by default; under the pointer, what that moment read.
+      Text {
+        anchors.right: parent.right
+        anchors.baseline: trendTitle.baseline
+        textFormat: Text.PlainText
+        text: {
+          var i = trendBox.hoverIndex
+          if (i < 0 || i >= trendBox.trend.values.length || trendBox.trend.values[i] === null)
+            return Model.spanLabel(trendBox.trend.span)
+          return Model.formatValue(trendBox.trend.values[i]) + " µg/m³ · "
+            + Model.clockTime(Model.trendCellTime(trendBox.trend, i))
+        }
+        color: trendBox.hoverIndex >= 0 ? view.foreground : view.faint
+        font.family: view.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+
+      Canvas {
+        id: chart
+        anchors.top: trendTitle.bottom
+        anchors.topMargin: Style.space(6)
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+
+        onWidthChanged: requestPaint()
+        onHeightChanged: requestPaint()
+
+        onPaint: {
+          var ctx = getContext("2d")
+          ctx.reset()
+          var values = trendBox.trend.values
+          var n = values.length
+          if (n < 2) return
+
+          var points = []
+          for (var i = 0; i < n; i++)
+            points.push({ x: trendBox.xAt(i), y: trendBox.yAt(values[i] === null ? 0 : values[i]) })
+
+          // One smooth curve through the points: each segment bends through
+          // the midpoint of its neighbours, so the line has no corners.
+          function trace() {
+            ctx.moveTo(points[0].x, points[0].y)
+            for (var k = 1; k < n - 1; k++) {
+              var mx = (points[k].x + points[k + 1].x) / 2
+              var my = (points[k].y + points[k + 1].y) / 2
+              ctx.quadraticCurveTo(points[k].x, points[k].y, mx, my)
+            }
+            ctx.lineTo(points[n - 1].x, points[n - 1].y)
+          }
+
+          // The index colours along time, as one horizontal gradient, so the
+          // curve and the area beneath it change colour where the air did.
+          var gradient = ctx.createLinearGradient(0, 0, width, 0)
+          for (var c = 0; c < n; c++)
+            gradient.addColorStop(c / (n - 1), String(trendBox.colorAt(c)))
+
+          ctx.globalAlpha = 0.16
+          ctx.fillStyle = gradient
+          ctx.beginPath()
+          trace()
+          ctx.lineTo(points[n - 1].x, height)
+          ctx.lineTo(points[0].x, height)
+          ctx.closePath()
+          ctx.fill()
+
+          // The legal norm, dashed, so the curve has something to be judged
+          // against: above the line is over the limit.
+          ctx.globalAlpha = 0.55
+          ctx.strokeStyle = String(view.faint)
+          ctx.lineWidth = 1
+          ctx.setLineDash([3, 4])
+          ctx.beginPath()
+          var ny = Math.round(trendBox.yAt(trendBox.norm)) + 0.5
+          ctx.moveTo(0, ny)
+          ctx.lineTo(width, ny)
+          ctx.stroke()
+          ctx.setLineDash([])
+
+          ctx.globalAlpha = 1
+          ctx.strokeStyle = gradient
+          ctx.lineWidth = 2
+          ctx.lineCap = "round"
+          ctx.lineJoin = "round"
+          ctx.beginPath()
+          trace()
+          ctx.stroke()
+        }
+
+        Text {
+          x: 0
+          y: Math.round(trendBox.yAt(trendBox.norm)) - height - 1
+          textFormat: Text.PlainText
+          text: "norm"
+          color: view.faint
+          font.family: view.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+
+        // Now: the last point, with a slow halo while the panel is open.
+        Item {
+          readonly property real value: trendBox.trend.values.length
+            ? trendBox.trend.values[trendBox.trend.values.length - 1] : 0
+          x: trendBox.xAt(trendBox.trend.values.length - 1)
+          y: trendBox.yAt(value)
+
+          Rectangle {
+            id: halo
+            anchors.centerIn: parent
+            width: Style.space(14)
+            height: width
+            radius: width / 2
+            color: "transparent"
+            border.width: 1
+            border.color: trendBox.colorAt(trendBox.trend.values.length - 1)
+            opacity: 0
+
+            ParallelAnimation {
+              running: view.visible && view.panel !== null && view.panel.opened === true
+              loops: Animation.Infinite
+              NumberAnimation { target: halo; property: "scale"; from: 0.4; to: 1.4; duration: 1800; easing.type: Easing.OutCubic }
+              NumberAnimation { target: halo; property: "opacity"; from: 0.9; to: 0; duration: 1800; easing.type: Easing.OutCubic }
+            }
+          }
+
+          Rectangle {
+            anchors.centerIn: parent
+            width: Style.space(6)
+            height: width
+            radius: width / 2
+            color: trendBox.colorAt(trendBox.trend.values.length - 1)
+          }
+        }
+
+        // The pointer's moment: a hairline and a dot on the curve.
+        Rectangle {
+          visible: trendBox.hoverIndex >= 0
+          x: Math.round(trendBox.xAt(trendBox.hoverIndex))
+          width: 1
+          height: parent.height
+          color: view.faint
+        }
+        Rectangle {
+          visible: trendBox.hoverIndex >= 0 && trendBox.trend.values[trendBox.hoverIndex] !== null
+          width: Style.space(5)
+          height: width
+          radius: width / 2
+          x: trendBox.xAt(trendBox.hoverIndex) - width / 2
+          y: trendBox.yAt(trendBox.trend.values[trendBox.hoverIndex]) - height / 2
+          color: trendBox.colorAt(trendBox.hoverIndex)
+        }
+
+        MouseArea {
+          anchors.fill: parent
+          hoverEnabled: true
+          onPositionChanged: function(mouse) {
+            var n = trendBox.trend.values.length
+            trendBox.hoverIndex = n < 2 ? -1
+              : Math.max(0, Math.min(n - 1, Math.round(mouse.x / width * (n - 1))))
+          }
+          onExited: trendBox.hoverIndex = -1
+        }
+      }
+    }
+
     // ---- the locker is a weather station too, 800 m away instead of
     // city-wide, which is the part wttr.in cannot do
     Rectangle {

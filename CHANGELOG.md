@@ -4,6 +4,18 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] — 2026-10-04
+
+### Added
+
+- **A trend chart in the plain skin.** The plain skin's counterpart to the
+  terminal sparkline: an area chart of PM2.5 over the same stored history (up
+  to 24 hours). The curve is smooth and its colour follows the index along
+  time, from the same per-slice PM2.5 and PM10 as the sparkline. A dashed
+  line marks the legal norm of 25 µg/m³, a dot with a slow halo marks the
+  latest reading (animated only while the panel is open), and hovering shows
+  the value and the time of that moment.
+
 ## [0.5.1] — 2026-10-03
 
 ### Changed
@@ -158,6 +170,7 @@ Last release under the name **InPost Air** (`priard.inpost-air`).
   validated arguments. Nothing written outside the plugin's `shell.json`
   entry.
 
+[0.6.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.6.0
 [0.5.1]: https://github.com/priard/omarchy-inair/releases/tag/v0.5.1
 [0.5.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.5.0
 [0.4.2]: https://github.com/priard/omarchy-inair/releases/tag/v0.4.2

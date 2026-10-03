@@ -195,9 +195,13 @@ version shows, and PM2.5 is drawn large in square pixel digits.
   single block on a dotted 970–1050 hPa ruler. Each row has an arrow showing
   which way the value has been moving.
 
-The **plain** skin shows the same content in ordinary widgets, with soft
-motes drifting behind the headline instead of the particle rows. There are
-more of them when the air is worse.
+The **plain** skin shows the same content in ordinary widgets, with soft motes
+drifting behind the headline instead of the particle rows; there are more of
+them when the air is worse. Its counterpart to the sparkline is an area chart
+of PM2.5 over the same stored history: a smooth curve whose colour follows the
+index along time, a dashed line at the legal norm (25 µg/m³), a pulsing dot
+for the latest reading, and, under the pointer, the value and the time it was
+measured.
 
 Readings refresh every five minutes. A failed refresh leaves the last reading
 on screen rather than blanking the bar.

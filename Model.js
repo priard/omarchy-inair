@@ -728,7 +728,7 @@ function sparkline(values, cells) {
 // come back in `extra`, keyed by field, aligned with `values`.
 function trendBuckets(samples, field, cells, now, windowMs, companions) {
   var others = companions || []
-  var empty = { values: [], extra: {}, span: 0 }
+  var empty = { values: [], extra: {}, span: 0, start: 0, end: 0 }
   var points = []
   for (var i = 0; i < (samples ? samples.length : 0); i++) {
     var s = samples[i]
@@ -773,7 +773,7 @@ function trendBuckets(samples, field, cells, now, windowMs, companions) {
 
   var extra = {}
   for (var o = 0; o < others.length; o++) extra[others[o]] = averaged(others[o])
-  return { values: averaged(field), extra: extra, span: end - start }
+  return { values: averaged(field), extra: extra, span: end - start, start: start, end: end }
 }
 
 function isNumber(value) {
@@ -794,6 +794,21 @@ function trendLevels(trend, scale) {
     out.push(computeIndex(readings, scale) || "")
   }
   return out
+}
+
+// The middle of trend cell `index`, as a time: what the plain skin's hover
+// read-out names.
+function trendCellTime(trend, index) {
+  if (!trend || !trend.values.length || trend.end <= trend.start) return null
+  var width = (trend.end - trend.start) / trend.values.length
+  return new Date(trend.start + (index + 0.5) * width)
+}
+
+function clockTime(date) {
+  if (!date) return ""
+  var h = date.getHours()
+  var m = date.getMinutes()
+  return (h < 10 ? "0" : "") + h + ":" + (m < 10 ? "0" : "") + m
 }
 
 // "last 40 min", "last 5 h", "last 24 h".
@@ -921,6 +936,8 @@ if (typeof module !== "undefined") {
     trendArrow: trendArrow,
     trendBuckets: trendBuckets,
     trendLevels: trendLevels,
+    trendCellTime: trendCellTime,
+    clockTime: clockTime,
     spanLabel: spanLabel,
     weatherCells: weatherCells,
     airDensity: airDensity,
