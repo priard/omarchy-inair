@@ -181,8 +181,12 @@ version shows, and PM2.5 is drawn large in square pixel digits.
   25 µg/m³, PM10 against 50). Past 100% the bar is full and the number tells
   the rest. PM1 and PM4 have no legal norm, so they get a dotted track.
 - **Trend.** A sparkline of PM2.5 over the last hours, up to a day. Each cell
-  is an average over an equal slice of time, so a night with the laptop
-  asleep shows as a flat stretch, not a jump. The readings are kept in a small
+  is an average over an equal slice of time, so a night with the laptop asleep
+  shows as a flat stretch, not a jump. Each cell is coloured by the index it
+  stood at in its own slice of time, worked out from that slice's PM2.5 and
+  PM10 on the scale in use, so a smoggy morning stays red after the air has
+  cleared. Only those two values are stored, so a cell can now and then differ
+  from the level InPost showed at the time. The readings are kept in a small
   private file (see below), so a shell restart or a plugin update does not
   wipe the trend. Switching to another locker starts a new one.
 - **Street weather**, in the same block cells as the meters. Temperature is a

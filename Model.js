@@ -722,37 +722,78 @@ function sparkline(values, cells) {
 // `windowMs` (at most), averaged into `cells` equal slices of time, so a gap —
 // the machine asleep overnight — reads as a stretch of the line, not as a
 // jump. A slice with no reading repeats the one before it.
-function trendBuckets(samples, field, cells, now, windowMs) {
+//
+// `companions` are other fields averaged over the very same slices — PM10
+// next to PM2.5 — so each cell can be judged on the index as a whole. They
+// come back in `extra`, keyed by field, aligned with `values`.
+function trendBuckets(samples, field, cells, now, windowMs, companions) {
+  var others = companions || []
+  var empty = { values: [], extra: {}, span: 0 }
   var points = []
   for (var i = 0; i < (samples ? samples.length : 0); i++) {
     var s = samples[i]
-    if (s && typeof s.at === "number" && typeof s[field] === "number" && isFinite(s[field]))
-      points.push(s)
+    if (s && typeof s.at === "number" && isFinite(s.at) && isNumber(s[field])) points.push(s)
   }
-  if (points.length < 2) return { values: [], span: 0 }
+  if (points.length < 2) return empty
   var end = points[points.length - 1].at
   var start = Math.max(points[0].at, (now || end) - (windowMs || 86400000))
   var inWindow = []
   for (var j = 0; j < points.length; j++) if (points[j].at >= start) inWindow.push(points[j])
-  if (inWindow.length < 2 || end <= start) return { values: [], span: 0 }
+  if (inWindow.length < 2 || end <= start) return empty
 
   var n = Math.max(1, Math.min(cells, inWindow.length))
   var width = (end - start) / n
-  var sums = []
-  var counts = []
-  for (var b = 0; b < n; b++) { sums.push(0); counts.push(0) }
+  var keys = [field].concat(others)
+  var sums = Object.create(null)
+  var counts = Object.create(null)
+  for (var f = 0; f < keys.length; f++) {
+    sums[keys[f]] = []
+    counts[keys[f]] = []
+    for (var b = 0; b < n; b++) { sums[keys[f]].push(0); counts[keys[f]].push(0) }
+  }
   for (var k = 0; k < inWindow.length; k++) {
     var index = Math.min(n - 1, Math.floor((inWindow[k].at - start) / width))
-    sums[index] += inWindow[k][field]
-    counts[index]++
+    for (var g = 0; g < keys.length; g++) {
+      var v = inWindow[k][keys[g]]
+      if (!isNumber(v)) continue
+      sums[keys[g]][index] += v
+      counts[keys[g]][index]++
+    }
   }
-  var values = []
-  var last = null
-  for (var c = 0; c < n; c++) {
-    if (counts[c] > 0) last = sums[c] / counts[c]
-    values.push(last)
+
+  function averaged(key) {
+    var out = []
+    var last = null
+    for (var c = 0; c < n; c++) {
+      if (counts[key][c] > 0) last = sums[key][c] / counts[key][c]
+      out.push(last)
+    }
+    return out
   }
-  return { values: values, span: end - start }
+
+  var extra = {}
+  for (var o = 0; o < others.length; o++) extra[others[o]] = averaged(others[o])
+  return { values: averaged(field), extra: extra, span: end - start }
+}
+
+function isNumber(value) {
+  return typeof value === "number" && isFinite(value)
+}
+
+// The index each trend cell stood at, on the scale in use, from the PM2.5 and
+// PM10 averaged into that cell — the same "worst sub-index" rule as
+// computeIndex. Only those two are stored, so where InPost's own verdict also
+// weighs something else, a cell can differ from the level it showed live.
+function trendLevels(trend, scale) {
+  var out = []
+  var pm10 = trend && trend.extra ? trend.extra.pm10 : null
+  for (var i = 0; i < (trend ? trend.values.length : 0); i++) {
+    var readings = Object.create(null)
+    if (isNumber(trend.values[i])) readings.pm25 = { value: trend.values[i], norm: null }
+    if (pm10 && isNumber(pm10[i])) readings.pm10 = { value: pm10[i], norm: null }
+    out.push(computeIndex(readings, scale) || "")
+  }
+  return out
 }
 
 // "last 40 min", "last 5 h", "last 24 h".
@@ -879,6 +920,7 @@ if (typeof module !== "undefined") {
     sparkline: sparkline,
     trendArrow: trendArrow,
     trendBuckets: trendBuckets,
+    trendLevels: trendLevels,
     spanLabel: spanLabel,
     weatherCells: weatherCells,
     airDensity: airDensity,

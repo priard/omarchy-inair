@@ -365,19 +365,35 @@ Item {
     }
 
     // ---- how PM2.5 has moved over the last hours (up to a day, kept across
-    // shell restarts), averaged into one cell per slice of time
+    // shell restarts), averaged into one cell per slice of time. Each cell is
+    // coloured by the index it stood at then, from the PM2.5 and PM10 of its
+    // own slice, so a smoggy morning stays red after the air has cleared.
     GridRow {
-      // As wide as the meters above it, so the line ends where the bars do.
       readonly property int sparkCells: Math.max(4, view.inner - 20)
       readonly property var trend: view.panel
-        ? Model.trendBuckets(view.panel.history, "pm25", sparkCells, Date.now(), view.panel.historyWindow)
-        : ({ values: [], span: 0 })
+        ? Model.trendBuckets(view.panel.history, "pm25", sparkCells, Date.now(),
+                             view.panel.historyWindow, ["pm10"])
+        : ({ values: [], extra: {}, span: 0 })
+      readonly property string line: Model.sparkline(trend.values, sparkCells)
+      readonly property var levels: Model.trendLevels(trend, view.scale)
+      readonly property var cells: {
+        var out = []
+        for (var i = 0; i < line.length; i++) {
+          var level = levels[i] || ""
+          out.push({ text: line.charAt(i),
+                     color: level === "" ? view.levelColor
+                       : view.ink(Model.levelInfo(level, view.scale).color) })
+        }
+        return out
+      }
+
       visible: trend.values.length >= 2
-      segments: [
-        { text: Model.padRight("TREND", 6) + " ", color: view.dim },
-        { text: Model.padRight(Model.sparkline(trend.values, sparkCells), sparkCells), color: view.levelColor },
-        { text: Model.padLeft(Model.spanLabel(trend.span), 13), color: view.dim }
-      ]
+      segments: [{ text: Model.padRight("TREND", 6) + " ", color: view.dim }]
+        .concat(cells)
+        .concat([
+          { text: Model.repeat(" ", sparkCells - line.length), color: view.dim },
+          { text: Model.padLeft(Model.spanLabel(trend.span), 13), color: view.dim }
+        ])
     }
 
     // ---- the locker doubles as a weather station

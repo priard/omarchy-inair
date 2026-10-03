@@ -4,6 +4,19 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] — 2026-10-03
+
+### Changed
+
+- **The trend line is coloured by the air at the time.** Each cell of the
+  sparkline takes the colour of the index it stood at in its own slice of
+  time, worked out from that slice's averaged PM2.5 and PM10 on the scale in
+  use (GIOŚ or EEA). Before, the whole line took the current level's colour,
+  so a smoggy morning turned green as soon as the air cleared. Nothing new is
+  stored: PM2.5 and PM10 were already in the history file. Because only those
+  two are kept, a cell can occasionally differ from the level InPost showed
+  live.
+
 ## [0.5.0] — 2026-10-03
 
 ### Added
@@ -145,6 +158,7 @@ Last release under the name **InPost Air** (`priard.inpost-air`).
   validated arguments. Nothing written outside the plugin's `shell.json`
   entry.
 
+[0.5.1]: https://github.com/priard/omarchy-inair/releases/tag/v0.5.1
 [0.5.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.5.0
 [0.4.2]: https://github.com/priard/omarchy-inair/releases/tag/v0.4.2
 [0.4.1]: https://github.com/priard/omarchy-inair/releases/tag/v0.4.1
