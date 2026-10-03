@@ -3,7 +3,9 @@
 Street-level air quality on your Omarchy bar, read from the sensor on the
 parcel locker down the street.
 
-![inAir panel, terminal skin](preview.png)
+![inAir's two skins side by side: terminal on the left, plain on the right](preview.png)
+
+<sub>Screenshots show a sensor in Wrocław and a made-up trend, for illustration.</sub>
 
 > **Unofficial.** inAir is an independent hobby project. It is not made,
 > endorsed, sponsored or supported by InPost S.A., and its author has no
@@ -202,6 +204,8 @@ of PM2.5 over the same stored history: a smooth curve whose colour follows the
 index along time, a dashed line at the legal norm (25 µg/m³), a pulsing dot
 for the latest reading, and, under the pointer, the value and the time it was
 measured.
+
+![The plain skin: motes drifting behind the headline, the trend chart's latest point pulsing](docs/inair-plain.gif)
 
 Readings refresh every five minutes. A failed refresh leaves the last reading
 on screen rather than blanking the bar.
