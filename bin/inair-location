@@ -1,0 +1,135 @@
+#!/usr/bin/python3 -I
+"""Read the location Omarchy's weather widget already stores, and nothing else.
+
+The file belongs to omarchy-weather-location, not to this plugin, so it is
+read the way any file another writer owns has to be read: one descriptor,
+opened O_NOFOLLOW so a symlink planted on the name cannot redirect the read,
+O_NONBLOCK so a FIFO on the name cannot hang the shell, then validated on that
+same descriptor and read from it. No second open, no pathname test followed by
+a trusting read.
+
+Output on stdout is either a JSON object with numeric `latitude`/`longitude`
+and a short `name`, or `{}` when the location has not been configured. Any
+refusal is a non-zero exit with a short message on stderr — never a guess, and
+never an IP lookup behind the user's back.
+"""
+
+import json
+import os
+import pwd
+import stat
+import sys
+
+MAX_BYTES = 16384
+STATE_PARTS = (".local", "state", "omarchy", "settings")
+STATE_FILE = "weather.json"
+MAX_NAME = 80
+
+
+def open_state_dir():
+    """Walk from the passwd home with held descriptors.
+
+    $HOME is just an environment variable, which any same-user process can
+    set; the passwd entry is the trust anchor. The home directory itself may
+    legitimately be a symlink, so only the components below it are opened
+    O_NOFOLLOW.
+    """
+    home = pwd.getpwuid(os.geteuid()).pw_dir
+    fd = os.open(home, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        for name in STATE_PARTS:
+            nfd = os.open(
+                name,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=fd,
+            )
+            os.close(fd)
+            fd = nfd
+            st = os.fstat(fd)
+            if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.geteuid():
+                raise PermissionError("untrusted directory component: " + name)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def read_bounded(dirfd, name):
+    fd = os.open(
+        name,
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC,
+        dir_fd=dirfd,
+    )
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise PermissionError("not a regular file")
+        if st.st_uid != os.geteuid():
+            raise PermissionError("not owned by this user")
+        if st.st_size > MAX_BYTES:
+            raise PermissionError("larger than %d bytes" % MAX_BYTES)
+
+        os.set_blocking(fd, True)
+        data = b""
+        while len(data) <= MAX_BYTES:
+            chunk = os.read(fd, min(65536, MAX_BYTES + 1 - len(data)))
+            if not chunk:
+                break
+            data += chunk
+        if len(data) > MAX_BYTES:
+            raise PermissionError("grew past %d bytes while reading" % MAX_BYTES)
+        return data
+    finally:
+        os.close(fd)
+
+
+def coordinate(value, limit):
+    number = float(value)
+    # NaN and the infinities all fail this comparison, which is the point.
+    if not -limit <= number <= limit:
+        raise ValueError("coordinate out of range")
+    return number
+
+
+def main():
+    try:
+        dirfd = open_state_dir()
+    except FileNotFoundError:
+        # Omarchy has simply never stored a location. Not an error.
+        sys.stdout.write("{}")
+        return 0
+
+    try:
+        raw = read_bounded(dirfd, STATE_FILE)
+    except FileNotFoundError:
+        sys.stdout.write("{}")
+        return 0
+    finally:
+        os.close(dirfd)
+
+    data = json.loads(raw.decode("utf-8", "strict"))
+    if not isinstance(data, dict):
+        raise ValueError("weather.json is not an object")
+
+    out = {}
+    if data.get("latitude") is not None and data.get("longitude") is not None:
+        out["latitude"] = coordinate(data["latitude"], 90)
+        out["longitude"] = coordinate(data["longitude"], 180)
+
+    name = data.get("name")
+    if isinstance(name, str):
+        # The name is rendered in the panel; strip the control characters that
+        # would otherwise travel into a text sink, and cap the length here
+        # rather than after it has been handed on.
+        out["name"] = "".join(c for c in name if c.isprintable())[:MAX_NAME].strip()
+
+    sys.stdout.write(json.dumps(out))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as exc:  # noqa: BLE001 - one short line, never a traceback
+        sys.stderr.write("inair-location: %s\n" % exc)
+        sys.exit(1)

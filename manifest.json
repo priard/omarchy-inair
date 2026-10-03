@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "priard.inair",
+  "name": "inAir",
+  "version": "0.4.0",
+  "author": "priard",
+  "license": "MIT",
+  "description": "Street-level air quality on your bar, from the public sensors on the parcel locker nearest you. Unofficial; not affiliated with InPost.",
+  "repository": "https://github.com/priard/omarchy-inair",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "inAir",
+    "description": "PM2.5 pill coloured by the air quality index, with a panel of the full sensor read-out.",
+    "category": "Info",
+    "allowMultiple": false,
+    "defaultSection": "center",
+    "defaults": {
+      "locker": "",
+      "index": "polish",
+      "style": "terminal",
+      "refreshMinutes": 5
+    },
+    "schema": [
+      {
+        "key": "locker",
+        "type": "string",
+        "label": "Pinned locker code (empty = nearest with a sensor)"
+      },
+      {
+        "key": "index",
+        "type": "string",
+        "label": "Index scale: polish or european"
+      },
+      {
+        "key": "style",
+        "type": "string",
+        "label": "Panel skin: terminal or plain"
+      },
+      {
+        "key": "refreshMinutes",
+        "type": "number",
+        "label": "Refresh interval (minutes)"
+      }
+    ]
+  }
+}

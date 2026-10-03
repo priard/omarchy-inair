@@ -1,0 +1,131 @@
+#!/usr/bin/bash
+# Every byte this plugin pulls off the network comes through here.
+#
+# The widget runs inside omarchy-shell, one process shared with the whole
+# desktop, so nothing unbounded may reach it: each subcommand caps the
+# response at the producer (curl --max-filesize plus head -c cap+1), runs
+# under an absolute deadline in its own session so no descendant outlives it,
+# and prints a small, strictly shaped document on stdout.
+#
+# Arguments are never spliced into a shell string and never into a URL before
+# they have matched an anchored pattern. Everything the callers pass comes
+# from InPost's own API, which is to say from the network, which is to say it
+# is untrusted.
+#
+# Endpoints, all public, all unauthenticated — no credential ever travels here:
+#   nearby  GET  api-shipx-pl.easypack24.net/v1/points?relative_point=…
+#   point   GET  api-shipx-pl.easypack24.net/v1/points/<code>
+#   id      GET  inpost.pl/<locker-page-slug>
+#   air     POST inpost.pl/shipx-point-data/<id>/<code>/air_index_level
+
+set -uo pipefail
+LC_ALL=C
+export LC_ALL
+
+readonly CURL=/usr/bin/curl
+readonly HEAD=/usr/bin/head
+readonly TIMEOUT=/usr/bin/timeout
+readonly SETSID=/usr/bin/setsid
+readonly GREP=/usr/bin/grep
+
+# ShipX answers ~90 KB for 100 points; the locker page is ~80 KB of HTML. The
+# caps are generous enough for both to grow and small enough that a hostile or
+# broken origin cannot fill the shell's heap.
+readonly MAX_POINTS=524288
+readonly MAX_PAGE=524288
+readonly MAX_AIR=16384
+
+readonly UA='omarchy-inair'
+
+die() {
+  printf '%s\n' "inair-fetch: $1" >&2
+  exit 1
+}
+
+# curl -q first so ~/.curlrc cannot add a second URL or a redirect; no -L, so a
+# redirect is a failure rather than a silent hop to somewhere else; --noproxy
+# so an environment proxy cannot see or rewrite the traffic.
+fetch() {
+  local url="$1" max="$2"
+  shift 2
+
+  local out
+  out=$("$SETSID" -w "$TIMEOUT" -k 2 -- 20 \
+        "$CURL" -q -sS --fail \
+          --proto '=https' --proto-redir '=https' --noproxy '*' \
+          --connect-timeout 5 --max-time 15 --max-filesize "$max" \
+          -A "$UA" "$@" -- "$url" \
+        | "$HEAD" -c $((max + 1)))
+  local rc=$?
+
+  [ "$rc" -eq 0 ] || exit "$rc"
+  [ ${#out} -le "$max" ] || die "response exceeded $max bytes"
+
+  printf '%s' "$out"
+}
+
+# A coordinate is a number with at most eight decimals. Anything else — an
+# empty string, a minus sign on its own, a second dot, a shell metacharacter —
+# never reaches the URL.
+valid_coord() {
+  [[ $1 =~ ^-?[0-9]{1,3}(\.[0-9]{1,8})?$ ]]
+}
+
+cmd_nearby() {
+  local lat="${1:-}" lon="${2:-}"
+  valid_coord "$lat" || die "invalid latitude"
+  valid_coord "$lon" || die "invalid longitude"
+
+  fetch "https://api-shipx-pl.easypack24.net/v1/points?relative_point=${lat},${lon}&limit=100" \
+    "$MAX_POINTS"
+}
+
+cmd_point() {
+  local code="${1:-}"
+  [[ $code =~ ^[A-Za-z0-9_-]{1,32}$ ]] || die "invalid locker code"
+
+  fetch "https://api-shipx-pl.easypack24.net/v1/points/${code}" "$MAX_POINTS"
+}
+
+# The locker's numeric id appears exactly once on its public page, in a
+# data-shipx-url attribute. The slug is built by the caller from ShipX address
+# fields and must arrive already reduced to the closed alphabet below, so no
+# path segment, query or scheme can be smuggled in through a street name.
+cmd_id() {
+  local slug="${1:-}"
+  [[ $slug =~ ^paczkomat-[a-z0-9-]{3,180}$ ]] || die "invalid locker page slug"
+
+  local page
+  page=$(fetch "https://inpost.pl/${slug}" "$MAX_PAGE") || exit $?
+
+  local match
+  match=$(printf '%s' "$page" \
+    | "$GREP" -m1 -oE 'data-shipx-url="/shipx-point-data/[0-9]{1,12}/[A-Za-z0-9_-]{1,32}/air_index_level"')
+  [ -n "$match" ] || die "no air sensor widget on this locker page"
+
+  # Field-split the matched attribute rather than running a second regex over
+  # the whole page: the shape is already fixed by the match above.
+  local rest="${match#data-shipx-url=\"/shipx-point-data/}"
+  local id="${rest%%/*}"
+  rest="${rest#*/}"
+  local code="${rest%%/*}"
+
+  printf '{"id":"%s","code":"%s"}\n' "$id" "$code"
+}
+
+cmd_air() {
+  local id="${1:-}" code="${2:-}"
+  [[ $id =~ ^[0-9]{1,12}$ ]] || die "invalid locker id"
+  [[ $code =~ ^[A-Za-z0-9_-]{1,32}$ ]] || die "invalid locker code"
+
+  fetch "https://inpost.pl/shipx-point-data/${id}/${code}/air_index_level" "$MAX_AIR" \
+    -X POST -H 'X-Requested-With: XMLHttpRequest'
+}
+
+case "${1:-}" in
+  nearby) shift; cmd_nearby "$@" ;;
+  point)  shift; cmd_point "$@" ;;
+  id)     shift; cmd_id "$@" ;;
+  air)    shift; cmd_air "$@" ;;
+  *)      die "usage: inair-fetch nearby LAT LON | point CODE | id SLUG | air ID CODE" ;;
+esac
