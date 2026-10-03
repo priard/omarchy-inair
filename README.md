@@ -121,9 +121,9 @@ meters.
 │ PM10   ██████░░░░░░░░░░░░░░   16.0   32% │
 │ TREND  █▆▇▅▂▂▃▁              last 40 min │
 ├─ STREET WEATHER ─────────────────────────┤
-│ TEMP   ━━━━━━━━━━━━●───────     17.3°C ↑ │
-│ RH     ━━━━━━━━━━━━━━━━━━━●       100% → │
-│ hPa    ━━━━━━━━━━━━━━●─────       1031 ↓ │
+│ TEMP   █████████████░░░░░░░     17.3°C ↑ │
+│ RH     ██████████████████░░        92% → │
+│ hPa    ··············█·····       1031 ↓ │
 │                                          │
 ├─ SENSORS IN RANGE ───────────────────────┤
 │ › GDA175M    Elbląska 52          1.8 km │
@@ -131,6 +131,9 @@ meters.
 │ / code · i index · s skin · r refresh    │
 └──────────────────────────────────────────┘
 ```
+
+In the panel itself the rows have more space between them than this text
+version shows, and PM2.5 is drawn large in square pixel digits.
 
 - **Air flow.** The two rows under the title are particles drifting past. The
   dirtier the air, the denser the drift: a few dots on a clean day, a haze
@@ -140,11 +143,15 @@ meters.
   the rest. PM1 and PM4 have no legal norm, so they get a dotted track.
 - **Trend.** A sparkline of PM2.5 over the readings gathered since the shell
   started. It is kept in memory only and starts over when you switch lockers.
-- **Street weather.** Temperature on a −20…40 °C scale, coloured from cold to
-  hot; relative humidity, 0–100%; pressure, 970–1050 hPa. Each has an arrow
-  showing which way it has been moving.
+- **Street weather**, in the same block cells as the meters. Temperature is a
+  heat strip on a −20…40 °C scale, each cell coloured by the temperature it
+  stands for, from cold blue to hot red. Humidity fills 0–100%. Pressure is a
+  single block on a dotted 970–1050 hPa ruler. Each row has an arrow showing
+  which way the value has been moving.
 
-The **plain** skin shows the same content in ordinary widgets.
+The **plain** skin shows the same content in ordinary widgets, with soft
+motes drifting behind the headline instead of the particle rows. There are
+more of them when the air is worse.
 
 Readings refresh every five minutes. A failed refresh leaves the last reading
 on screen rather than blanking the bar.

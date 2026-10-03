@@ -46,6 +46,12 @@ Item {
   readonly property int cols: Math.max(34, Math.floor(width / cellWidth))
   readonly property int inner: cols - 4
 
+  // Rows are taller than the font's own line. A grid packed at exactly one
+  // line per row looked like a wall of text; the extra lead gives every row
+  // room, and the vertical walls are drawn as continuous lines (below) so the
+  // frame stays closed however far apart the rows are.
+  readonly property real rowHeight: Math.round(cell.height * 1.45)
+
   // Header buttons: four of them, two cells each, one cell apart. The top rule
   // leaves `actionReserve` cells blank for them to float over.
   readonly property int actionCells: 2
@@ -63,6 +69,8 @@ Item {
   component GridLine: Text {
     property alias line: gridText.text
     id: gridText
+    height: view.rowHeight
+    verticalAlignment: Text.AlignVCenter
     textFormat: Text.PlainText
     font.family: view.fontFamily
     font.pixelSize: view.fontSize
@@ -97,6 +105,7 @@ Item {
 
     // ---- top rule, with the actions floating over the cells it leaves blank
     Item {
+      id: topRow
       width: parent.width
       height: topLine.height
 
@@ -154,12 +163,13 @@ Item {
         required property var modelData
         required property int index
         width: body.width
-        height: cell.height
+        height: Math.round(cell.height * 1.1)
 
-        Wall { x: 0 }
         Text {
           x: 2 * view.cellWidth
           width: view.inner * view.cellWidth
+          height: parent.height
+          verticalAlignment: Text.AlignVCenter
           clip: true
           textFormat: Text.PlainText
           text: modelData
@@ -168,25 +178,73 @@ Item {
           font.family: view.fontFamily
           font.pixelSize: view.fontSize
         }
-        Wall { x: (view.cols - 1) * view.cellWidth }
       }
     }
 
-    // ---- hero: the index in brackets, the headline number on the right
-    GridRow {
-      segments: [
-        { text: Model.padRight("[ " + (view.panel ? view.panel.levelMeta.label.toUpperCase() : "—") + " ]",
-                               view.inner - 16), color: view.levelColor },
-        { text: Model.padLeft(view.heroValue + " µg/m³", 16), color: view.foreground }
-      ]
-    }
+    GridLine { line: Model.frameRow("", view.cols); height: Math.round(view.rowHeight / 2) }
 
-    GridRow {
-      segments: [
-        { text: Model.padRight(view.scale === "european" ? "EEA INDEX" : "GIOŚ INDEX",
-                               view.inner - 16), color: view.faint },
-        { text: Model.padLeft("PM2.5", 16), color: view.faint }
-      ]
+    // ---- hero: the index on the left, PM2.5 in pixel digits on the right.
+    // The digits are drawn as real square pixels, not as half-block glyphs:
+    // ▀ and ▄ leave font-dependent gaps between rows and the number came out
+    // torn. A pixel is most of a cell wide, so the number still sits on the
+    // grid's rhythm.
+    Item {
+      width: body.width
+      height: Math.max(view.rowHeight * 2, digits.height + view.rowHeight * 0.5)
+
+      Column {
+        x: 2 * view.cellWidth
+        anchors.verticalCenter: parent.verticalCenter
+
+        Text {
+          textFormat: Text.PlainText
+          text: "[ " + (view.panel ? view.panel.levelMeta.label.toUpperCase() : "—") + " ]"
+          color: view.levelColor
+          font.family: view.fontFamily
+          font.pixelSize: view.fontSize
+          font.bold: true
+        }
+        Text {
+          textFormat: Text.PlainText
+          text: view.scale === "european" ? "EEA INDEX" : "GIOŚ INDEX"
+          color: view.dim
+          font.family: view.fontFamily
+          font.pixelSize: view.fontSize
+        }
+      }
+
+      Row {
+        anchors.right: parent.right
+        anchors.rightMargin: 2 * view.cellWidth
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: view.cellWidth
+
+        PixelNumber {
+          id: digits
+          text: view.heroValue === "—" ? "-" : view.heroValue
+          pixel: Math.max(4, Math.round(view.rowHeight / 4))
+          color: view.foreground
+          anchors.bottom: parent.bottom
+        }
+
+        Column {
+          anchors.bottom: parent.bottom
+          Text {
+            textFormat: Text.PlainText
+            text: "µg/m³"
+            color: view.dim
+            font.family: view.fontFamily
+            font.pixelSize: view.fontSize
+          }
+          Text {
+            textFormat: Text.PlainText
+            text: "PM2.5"
+            color: view.faint
+            font.family: view.fontFamily
+            font.pixelSize: view.fontSize
+          }
+        }
+      }
     }
 
     GridLine { line: Model.frameRow("", view.cols) }
@@ -339,19 +397,31 @@ Item {
           : Model.weatherCells(modelData.label, reading, modelData.field, modelData.unit,
               modelData.decimals,
               Model.trendArrow(view.panel.series(modelData.field), modelData.band), view.cols)
-        readonly property color gaugeColor: modelData.field === "temperature"
-          ? view.ink(Model.temperatureColor(reading))
-          : (modelData.field === "humidity" ? view.ink("#4fa8e0") : view.foreground)
+        readonly property color gaugeColor: modelData.field === "humidity"
+          ? view.ink("#4fa8e0") : view.foreground
+
+        // The heat strip is one segment per filled cell, each in the colour
+        // of the temperature that cell stands for; the other gauges are one
+        // run in one colour.
+        readonly property var gauge: {
+          if (cells === null) return []
+          if (modelData.field !== "temperature")
+            return [{ text: cells.filled, color: gaugeColor }, { text: cells.marker, color: view.foreground }]
+          var out = []
+          for (var i = 0; i < cells.cells; i++)
+            out.push({ text: "█",
+                       color: view.ink(Model.temperatureColor(Model.cellValue(i, cells.min, cells.max, cells.width))) })
+          return out
+        }
 
         visible: cells !== null
-        segments: cells === null ? [] : [
-          { text: cells.label + " ", color: view.dim },
-          { text: cells.filled, color: gaugeColor },
-          { text: cells.marker, color: gaugeColor },
-          { text: cells.track, color: view.faint },
-          { text: " " + cells.value, color: view.foreground },
-          { text: cells.trend, color: view.dim }
-        ]
+        segments: cells === null ? [] : [{ text: cells.label + " ", color: view.dim }]
+          .concat(gauge)
+          .concat([
+            { text: cells.track, color: view.faint },
+            { text: " " + cells.value, color: view.foreground },
+            { text: cells.trend, color: view.dim }
+          ])
       }
     }
 
@@ -457,7 +527,7 @@ Item {
                    color: view.faint }]
     }
 
-    GridLine { line: Model.frameBottom(view.cols); color: view.levelColor }
+    GridLine { id: bottomRule; line: Model.frameBottom(view.cols); color: view.levelColor }
   }
 
   // ------------------------------------------------------------- derived
@@ -522,12 +592,70 @@ Item {
     return lines
   }
 
-  component Wall: Text {
-    textFormat: Text.PlainText
-    text: "│"
-    color: view.levelColor
-    font.family: view.fontFamily
-    font.pixelSize: view.fontSize
+  // The frame's two vertical walls, from the top rule to the bottom one, in
+  // column 0 and column cols-1 where the box-drawing corners sit. One │ per
+  // row would leave a gap at every row now that rows are taller than a line,
+  // and a 1px Rectangle in its place breaks up on fractional display scaling.
+  // So each wall is a run of │ glyphs set slightly tighter than the font's
+  // own line height: the strokes overlap into one continuous line drawn by
+  // the same font, at the same weight, as the corners it joins.
+  Repeater {
+    model: [0, view.cols - 1]
+
+    Item {
+      required property int modelData
+      readonly property real lineStep: cell.height * 0.8
+
+      x: modelData * view.cellWidth
+      y: topRow.y + view.rowHeight / 2
+      width: view.cellWidth
+      height: Math.max(0, bottomRule.y - topRow.y)
+      clip: true
+
+      Text {
+        y: -cell.height / 2
+        textFormat: Text.PlainText
+        text: Model.repeat("│\n", Math.ceil(parent.height / parent.lineStep) + 2)
+        lineHeightMode: Text.FixedHeight
+        lineHeight: parent.lineStep
+        color: view.levelColor
+        font.family: view.fontFamily
+        font.pixelSize: view.fontSize
+      }
+    }
+  }
+
+  // A number in the 3×5 pixel font from Model.js, one Rectangle per lit pixel
+  // with a hairline gap between pixels so it reads as pixels, not as strokes.
+  component PixelNumber: Row {
+    id: number
+    property string text: ""
+    property int pixel: 5
+    property color color: "white"
+
+    spacing: pixel
+
+    Repeater {
+      model: number.text.split("")
+
+      Grid {
+        required property string modelData
+        readonly property var glyph: Model.pixelGlyph(modelData)
+        columns: glyph[0].length
+        spacing: 1
+
+        Repeater {
+          model: glyph.join("").split("")
+
+          Rectangle {
+            required property string modelData
+            width: number.pixel
+            height: number.pixel
+            color: modelData === "1" ? number.color : "transparent"
+          }
+        }
+      }
+    }
   }
 
   // A row of the grid assembled from coloured segments. The segment widths are
@@ -537,19 +665,13 @@ Item {
     property var segments: []
 
     width: body.width
-    height: cell.height
+    height: view.rowHeight
 
-    // The walls are placed at their grid columns, not laid out after the
-    // content. Flowing them left to right meant the closing wall sat wherever
-    // the segments happened to end, and a row whose pieces measured a hair
-    // wide — rounding, accumulated over forty-odd cells — pushed it past the
-    // panel's clip and the wall vanished on exactly the rows carrying meters.
-    // Column zero and column cols-1 are where the corners above and below sit,
-    // so that is where these go, whatever the content does.
-    Wall { x: 0 }
-
+    // The walls are not part of the row: they are the two continuous lines
+    // drawn over the whole frame, so a row only lays out what is between them.
     Row {
       x: 2 * view.cellWidth
+      height: parent.height
       spacing: 0
 
       // Each piece is given the width its characters occupy on the grid rather
@@ -563,6 +685,8 @@ Item {
           textFormat: Text.PlainText
           text: modelData.text
           width: modelData.text.length * view.cellWidth
+          height: parent.height
+          verticalAlignment: Text.AlignVCenter
           clip: true
           color: modelData.color
           font.family: view.fontFamily
@@ -570,8 +694,6 @@ Item {
         }
       }
     }
-
-    Wall { x: (view.cols - 1) * view.cellWidth }
   }
 
   // One of the header buttons floating in the top rule. The hit area is the
@@ -589,7 +711,7 @@ Item {
     signal activated()
 
     width: view.cellWidth * view.actionCells
-    height: cell.height
+    height: cell.height * 1.2
 
     Rectangle {
       anchors.fill: parent

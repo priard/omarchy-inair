@@ -35,6 +35,61 @@ Item {
 
   implicitHeight: column.implicitHeight
 
+  readonly property real flowDensity: {
+    if (!air) return 0.04
+    var pct = Model.normPercent(air.readings, "pm25")
+    if (pct === null) pct = Model.normPercent(air.readings, "pm10")
+    return Model.airDensity(pct)
+  }
+
+  component AirDrift: Item {
+    id: field
+    property real density: 0.05
+    property color tint: "white"
+    property bool running: false
+
+    clip: true
+
+    Repeater {
+      model: Math.round(6 + field.density * 50)
+
+      Rectangle {
+        id: mote
+        readonly property real size: 2 + Math.random() * 3.5
+        readonly property real lane: Math.random()
+        readonly property int travel: 9000 + Math.random() * 11000
+        // Each mote starts somewhere along its trip rather than all of them
+        // off the left edge, so the field is already full when the panel opens.
+        readonly property real phase: Math.random()
+        property real progress: 0
+        property real sway: 0
+
+        width: size
+        height: size
+        radius: size / 2
+        color: field.tint
+        opacity: 0.15 + Math.random() * 0.35
+        x: ((progress + phase) % 1) * (field.width + 2 * size) - size
+        y: lane * Math.max(0, field.height - size) + sway
+
+        NumberAnimation on progress {
+          from: 0
+          to: 1
+          duration: mote.travel
+          loops: Animation.Infinite
+          running: field.running
+        }
+
+        SequentialAnimation on sway {
+          loops: Animation.Infinite
+          running: field.running
+          NumberAnimation { to: -5; duration: mote.travel / 4; easing.type: Easing.InOutSine }
+          NumberAnimation { to: 5; duration: mote.travel / 4; easing.type: Easing.InOutSine }
+        }
+      }
+    }
+  }
+
   Column {
     id: column
     width: parent.width
@@ -133,6 +188,19 @@ Item {
     Item {
       width: parent.width
       height: Math.max(indexChip.height, heroRight.height)
+
+      // Behind the hero, a few soft motes drifting with the wind: the plain
+      // skin's counterpart to the terminal's particle rows. As many as the
+      // air is dirty, in the index colour, and still unless the panel is open.
+      AirDrift {
+        anchors.fill: parent
+        anchors.topMargin: -Style.space(10)
+        anchors.bottomMargin: -Style.space(10)
+        z: -1
+        density: view.flowDensity
+        tint: view.levelColor
+        running: view.visible && view.panel !== null && view.panel.opened === true
+      }
 
       Rectangle {
         id: indexChip

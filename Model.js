@@ -99,10 +99,20 @@ var EU_LEVELS = {
 
 var UNKNOWN_LEVEL = { rank: 0, label: "No reading", short: "—", color: "#707880" }
 
+// InPost does not always spell the fourth GIOŚ band the way the table does:
+// the readings endpoint says SATISFACTORY ("dostateczny") where the label is
+// SUFFICIENT. Unknown to the table, it used to grey the whole panel out and
+// call a perfectly good reading "No reading".
+var LEVEL_ALIASES = { "SATISFACTORY": "SUFFICIENT" }
+
+function canonicalLevel(level) {
+  var key = String(level || "").toUpperCase()
+  return LEVEL_ALIASES[key] || key
+}
+
 function levelInfo(level, scale) {
   var table = String(scale || "polish") === "european" ? EU_LEVELS : LEVELS
-  var key = String(level || "").toUpperCase()
-  return table[key] || UNKNOWN_LEVEL
+  return table[canonicalLevel(level)] || UNKNOWN_LEVEL
 }
 
 // ------------------------------------------------------- sensor parsing
@@ -163,7 +173,7 @@ function parseAirResponse(raw) {
   }
 
   return {
-    level: plain(data.air_index_level, 32).toUpperCase(),
+    level: canonicalLevel(plain(data.air_index_level, 32)),
     readings: readings,
     source: plain(data.message, 96),
     at: new Date()
@@ -277,7 +287,7 @@ function normalizePoint(item) {
 
   var details = item.address_details || {}
   var address = item.address || {}
-  var level = plain(item.air_index_level, 32).toUpperCase()
+  var level = canonicalLevel(plain(item.air_index_level, 32))
 
   return {
     code: code,
@@ -600,16 +610,88 @@ function temperatureColor(celsius) {
   return stops[stops.length - 1].c
 }
 
-// A slider-style gauge: ━━━━━━●──────. The run up to the marker is the value,
-// the rest the scale. Split in three so the view can colour each part.
-function gaugeParts(value, min, max, cells) {
-  var width = Math.max(3, cells)
-  if (value === null || value === undefined || isNaN(value))
-    return { filled: "", marker: "", track: repeat("·", width) }
+// Where a value sits on its scale, as a cell index 0..cells-1, or -1 when
+// there is no value. Shared by every weather gauge so they agree on rounding.
+function scaleCell(value, min, max, cells) {
+  if (value === null || value === undefined || isNaN(value)) return -1
   var t = Math.max(0, Math.min(1, (value - min) / (max - min)))
-  var at = Math.round(t * (width - 1))
-  return { filled: repeat("━", at), marker: "●", track: repeat("─", width - at - 1) }
+  return Math.round(t * (cells - 1))
 }
+
+// The weather gauges, drawn in the same block cells as the pollutant meters
+// so the panel reads as one grid:
+//
+//   heat     ████████░░░░░░  — filled up to the value; the view colours each
+//                              cell by the temperature *it* stands for, so the
+//                              run reads as a cold-to-hot strip
+//   level    ██████████████░ — a plain share of the scale (humidity)
+//   ruler    ······█········ — one block on a dotted rule (pressure), where the
+//                              position matters and "how full" does not
+function weatherParts(kind, value, min, max, cells) {
+  var width = Math.max(3, cells)
+  var at = scaleCell(value, min, max, width)
+  if (at < 0) return { cells: 0, filled: "", marker: "", track: repeat("·", width) }
+  if (kind === "ruler")
+    return { cells: 0, filled: repeat("·", at), marker: "█", track: repeat("·", width - at - 1) }
+  var n = at + 1
+  return { cells: n, filled: repeat("█", n), marker: "", track: repeat("░", width - n) }
+}
+
+// The temperature a heat-strip cell stands for: its centre on the scale.
+function cellValue(index, min, max, cells) {
+  return min + (index + 0.5) / Math.max(1, cells) * (max - min)
+}
+
+var WEATHER_KINDS = { temperature: "heat", humidity: "level", pressure: "ruler" }
+
+// One weather row of the terminal grid: label, gauge, value, trend. Same
+// column widths as readingCells, so the weather rows line up under the
+// pollutants.
+function weatherCells(label, value, field, unit, decimals, trend, cols) {
+  var inner = Math.max(24, cols - 4)
+  var gaugeWidth = Math.max(4, inner - READING_LABEL_CELLS - READING_VALUE_CELLS
+    - READING_NORM_CELLS - 3)
+  var scale = WEATHER_SCALES[field] || { min: 0, max: 100 }
+  var parts = weatherParts(WEATHER_KINDS[field] || "level", value, scale.min, scale.max, gaugeWidth)
+  var shown = value === null || value === undefined ? "—" : formatValue(value, decimals) + unit
+  return {
+    label: padRight(label, READING_LABEL_CELLS),
+    width: gaugeWidth,
+    min: scale.min,
+    max: scale.max,
+    cells: parts.cells,
+    filled: parts.filled,
+    marker: parts.marker,
+    track: parts.track,
+    value: padLeft(shown, READING_VALUE_CELLS + READING_NORM_CELLS - 1),
+    trend: padLeft(trend || " ", 2)
+  }
+}
+
+// ------------------------------------------------------------ big digits
+
+// The headline number in a 3×5 pixel font. The terminal skin draws each lit
+// pixel as a square. Anything without a glyph — a letter, the dash for "no
+// reading" — falls back to a bar across the middle.
+var PIXEL_FONT = {
+  "0": ["111", "101", "101", "101", "111"],
+  "1": ["110", "010", "010", "010", "111"],
+  "2": ["111", "001", "111", "100", "111"],
+  "3": ["111", "001", "111", "001", "111"],
+  "4": ["101", "101", "111", "001", "001"],
+  "5": ["111", "100", "111", "001", "111"],
+  "6": ["111", "100", "111", "101", "111"],
+  "7": ["111", "001", "001", "001", "001"],
+  "8": ["111", "101", "111", "101", "111"],
+  "9": ["111", "101", "111", "001", "111"],
+  ".": ["0", "0", "0", "0", "1"],
+  "-": ["000", "000", "111", "000", "000"]
+}
+
+function pixelGlyph(character) {
+  return PIXEL_FONT[String(character)] || PIXEL_FONT["-"]
+}
+
 
 // ▁▂▃▄▅▆▇█ over whatever history the session has gathered, newest on the
 // right, scaled to its own range: this is the shape of the last hours, not an
@@ -647,26 +729,6 @@ function trendArrow(values, threshold) {
   if (delta > band) return "↑"
   if (delta < -band) return "↓"
   return "→"
-}
-
-// One weather row of the terminal grid: label, gauge, value, trend. Same
-// column widths as readingCells, so the weather rows line up under the
-// pollutants.
-function weatherCells(label, value, field, unit, decimals, trend, cols) {
-  var inner = Math.max(24, cols - 4)
-  var gaugeWidth = Math.max(4, inner - READING_LABEL_CELLS - READING_VALUE_CELLS
-    - READING_NORM_CELLS - 3)
-  var scale = WEATHER_SCALES[field] || { min: 0, max: 100 }
-  var parts = gaugeParts(value, scale.min, scale.max, gaugeWidth)
-  var shown = value === null || value === undefined ? "—" : formatValue(value, decimals) + unit
-  return {
-    label: padRight(label, READING_LABEL_CELLS),
-    filled: parts.filled,
-    marker: parts.marker,
-    track: parts.track,
-    value: padLeft(shown, READING_VALUE_CELLS + READING_NORM_CELLS - 1),
-    trend: padLeft(trend || " ", 2)
-  }
 }
 
 // ------------------------------------------------------------ air flow
@@ -765,7 +827,9 @@ if (typeof module !== "undefined") {
     readable: readable,
     tone: tone,
     temperatureColor: temperatureColor,
-    gaugeParts: gaugeParts,
+    weatherParts: weatherParts,
+    cellValue: cellValue,
+    pixelGlyph: pixelGlyph,
     sparkline: sparkline,
     trendArrow: trendArrow,
     weatherCells: weatherCells,

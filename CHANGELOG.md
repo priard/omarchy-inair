@@ -4,6 +4,31 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] — 2026-10-03
+
+### Changed
+
+- **Terminal skin has room to breathe.** Rows are taller than a line of text,
+  and the frame's walls are drawn as continuous lines instead of a `│` per
+  row, so the frame stays closed. The panel is wider, too.
+- **PM2.5 in pixel digits.** The headline number is drawn in a 3×5 pixel font
+  made of real squares.
+- **Street weather in block cells**, matching the pollutant meters instead of
+  the smooth sliders from 0.4.0. Temperature is a heat strip coloured cell by
+  cell from cold to hot, humidity a filled bar, pressure a block on a dotted
+  ruler.
+
+### Added
+
+- **Plain skin animation.** Soft motes drift behind the headline, as many as
+  the air is dirty, only while the panel is open.
+
+### Fixed
+
+- **"No reading" on a perfectly good reading.** The readings endpoint spells
+  the fourth GIOŚ band `SATISFACTORY`, which the plugin didn't know; the panel
+  greyed out and showed "No reading". It is now read as "Sufficient".
+
 ## [0.4.0] — 2026-10-03
 
 ### Changed
@@ -77,4 +102,5 @@ Last release under the name **InPost Air** (`priard.inpost-air`).
   validated arguments. Nothing written outside the plugin's `shell.json`
   entry.
 
+[0.4.1]: https://github.com/priard/omarchy-inair/releases/tag/v0.4.1
 [0.4.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.4.0
