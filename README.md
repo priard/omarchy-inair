@@ -63,6 +63,29 @@ panel, press `/` and type a locker code; it is printed on the locker and shown
 in the InPost app. This plugin never looks up your location from your IP
 address.
 
+### Update
+
+```bash
+omarchy plugin update priard.inair
+```
+
+This fetches the latest version from GitHub, shows what changed and asks
+before applying it. Add `--yes` to skip the question, or leave out the id to
+update every git-installed plugin at once. The new version is validated
+before it is kept; if validation fails, the update is rolled back. The update
+only fast-forwards, so it refuses to run if you have edited the plugin's files
+locally. Your settings in `shell.json` are kept.
+
+The shell reloads the plugin when its files change, but it can keep parts of
+the old version cached. If the panel still looks the same after an update,
+restart the shell:
+
+```bash
+omarchy-restart-shell
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for what each version changed.
+
 ### Coming from InPost Air 0.3.0?
 
 The plugin was renamed in 0.4.0, and its id changed from `priard.inpost-air`
