@@ -718,6 +718,52 @@ function sparkline(values, cells) {
   return out
 }
 
+// The trend line over time rather than over samples: the readings of the last
+// `windowMs` (at most), averaged into `cells` equal slices of time, so a gap —
+// the machine asleep overnight — reads as a stretch of the line, not as a
+// jump. A slice with no reading repeats the one before it.
+function trendBuckets(samples, field, cells, now, windowMs) {
+  var points = []
+  for (var i = 0; i < (samples ? samples.length : 0); i++) {
+    var s = samples[i]
+    if (s && typeof s.at === "number" && typeof s[field] === "number" && isFinite(s[field]))
+      points.push(s)
+  }
+  if (points.length < 2) return { values: [], span: 0 }
+  var end = points[points.length - 1].at
+  var start = Math.max(points[0].at, (now || end) - (windowMs || 86400000))
+  var inWindow = []
+  for (var j = 0; j < points.length; j++) if (points[j].at >= start) inWindow.push(points[j])
+  if (inWindow.length < 2 || end <= start) return { values: [], span: 0 }
+
+  var n = Math.max(1, Math.min(cells, inWindow.length))
+  var width = (end - start) / n
+  var sums = []
+  var counts = []
+  for (var b = 0; b < n; b++) { sums.push(0); counts.push(0) }
+  for (var k = 0; k < inWindow.length; k++) {
+    var index = Math.min(n - 1, Math.floor((inWindow[k].at - start) / width))
+    sums[index] += inWindow[k][field]
+    counts[index]++
+  }
+  var values = []
+  var last = null
+  for (var c = 0; c < n; c++) {
+    if (counts[c] > 0) last = sums[c] / counts[c]
+    values.push(last)
+  }
+  return { values: values, span: end - start }
+}
+
+// "last 40 min", "last 5 h", "last 24 h".
+function spanLabel(ms) {
+  if (!ms || ms <= 0) return ""
+  var minutes = Math.max(1, Math.round(ms / 60000))
+  if (minutes < 60) return "last " + minutes + " min"
+  var hours = minutes / 60
+  return "last " + (hours < 10 ? formatValue(hours, hours % 1 === 0 ? 0 : 1) : String(Math.round(hours))) + " h"
+}
+
 // ↑ ↓ → between the oldest and newest of the recent readings, with a dead
 // band so sensor jitter does not flap the arrow.
 function trendArrow(values, threshold) {
@@ -832,6 +878,8 @@ if (typeof module !== "undefined") {
     pixelGlyph: pixelGlyph,
     sparkline: sparkline,
     trendArrow: trendArrow,
+    trendBuckets: trendBuckets,
+    spanLabel: spanLabel,
     weatherCells: weatherCells,
     airDensity: airDensity,
     airFlowRows: airFlowRows,

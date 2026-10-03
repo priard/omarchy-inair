@@ -364,15 +364,19 @@ Item {
       }
     }
 
-    // ---- how PM2.5 has moved while the panel has been running
+    // ---- how PM2.5 has moved over the last hours (up to a day, kept across
+    // shell restarts), averaged into one cell per slice of time
     GridRow {
-      readonly property var values: view.panel ? view.panel.series("pm25") : []
-      readonly property int sparkCells: Math.max(4, view.inner - 6 - 1 - 12)
-      visible: values.length >= 2
+      // As wide as the meters above it, so the line ends where the bars do.
+      readonly property int sparkCells: Math.max(4, view.inner - 20)
+      readonly property var trend: view.panel
+        ? Model.trendBuckets(view.panel.history, "pm25", sparkCells, Date.now(), view.panel.historyWindow)
+        : ({ values: [], span: 0 })
+      visible: trend.values.length >= 2
       segments: [
         { text: Model.padRight("TREND", 6) + " ", color: view.dim },
-        { text: Model.padRight(Model.sparkline(values, sparkCells), sparkCells), color: view.levelColor },
-        { text: Model.padLeft(view.historySpan, 12), color: view.dim }
+        { text: Model.padRight(Model.sparkline(trend.values, sparkCells), sparkCells), color: view.levelColor },
+        { text: Model.padLeft(Model.spanLabel(trend.span), 13), color: view.dim }
       ]
     }
 
@@ -563,15 +567,6 @@ Item {
   }
 
   // How much time the sparkline covers, from the samples' own timestamps.
-  readonly property string historySpan: {
-    if (!panel || panel.history.length < 2) return ""
-    var first = panel.history[0].at
-    var last = panel.history[panel.history.length - 1].at
-    var minutes = Math.max(1, Math.round((last - first) / 60000))
-    return minutes < 60 ? "last " + minutes + " min"
-      : "last " + Model.formatValue(minutes / 60, minutes % 60 === 0 ? 0 : 1) + " h"
-  }
-
   // Status text is wrapped here rather than by Text.WordWrap, because a
   // wrapped Text would push its own second line past the frame's right wall.
   readonly property var statusLines: {

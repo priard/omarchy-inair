@@ -4,6 +4,29 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-10-03
+
+### Added
+
+- **The trend survives restarts.** The PM2.5 readings of the last 24 hours
+  are kept in `~/.local/state/priard.inair/history.json`, so a shell restart
+  or a plugin update no longer wipes the sparkline. The file is the only one
+  the plugin creates: private (0600 in a 0700 directory) from creation,
+  capped in size, pruned to a day, and tied to one locker. All access goes
+  through a new helper, `bin/inair-history`, which refuses symlinks, FIFOs,
+  foreign or oversized files and writes atomically; the readings reach it on
+  stdin, never in argv.
+
+### Changed
+
+- **The sparkline is drawn over time, not over samples.** Each cell is an
+  average over an equal slice of the covered period (up to 24 hours), so a
+  gap while the machine slept reads as a flat stretch, not a jump. The label
+  says how far back it reaches ("last 5.9 h").
+- The sparkline is exactly as wide as the meters above it.
+- README: the files table and the removal section now name the trend file,
+  which survives `omarchy plugin remove`, and how to delete it.
+
 ## [0.4.2] — 2026-10-03
 
 ### Fixed
@@ -122,6 +145,7 @@ Last release under the name **InPost Air** (`priard.inpost-air`).
   validated arguments. Nothing written outside the plugin's `shell.json`
   entry.
 
+[0.5.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.5.0
 [0.4.2]: https://github.com/priard/omarchy-inair/releases/tag/v0.4.2
 [0.4.1]: https://github.com/priard/omarchy-inair/releases/tag/v0.4.1
 [0.4.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.4.0

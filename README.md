@@ -180,8 +180,11 @@ version shows, and PM2.5 is drawn large in square pixel digits.
 - **Meters.** The filled run is the share of the legal norm (PM2.5 against
   25 µg/m³, PM10 against 50). Past 100% the bar is full and the number tells
   the rest. PM1 and PM4 have no legal norm, so they get a dotted track.
-- **Trend.** A sparkline of PM2.5 over the readings gathered since the shell
-  started. It is kept in memory only and starts over when you switch lockers.
+- **Trend.** A sparkline of PM2.5 over the last hours, up to a day. Each cell
+  is an average over an equal slice of time, so a night with the laptop
+  asleep shows as a flat stretch, not a jump. The readings are kept in a small
+  private file (see below), so a shell restart or a plugin update does not
+  wipe the trend. Switching to another locker starts a new one.
 - **Street weather**, in the same block cells as the meters. Temperature is a
   heat strip on a −20…40 °C scale, each cell coloured by the temperature it
   stands for, from cold blue to hot red. Humidity fills 0–100%. Pressure is a
@@ -242,9 +245,22 @@ Every request goes through `bin/inair-fetch`. It only accepts arguments that
 match fixed patterns, refuses redirects and proxies, caps the size of every
 response, and kills the request after a deadline.
 
-Files: the plugin **writes nothing outside its own entry in `shell.json`**. It
-reads `~/.local/state/omarchy/settings/weather.json` (Omarchy's own location
-file) and never modifies it. The trend history is kept in memory only.
+Files:
+
+| Path | Access | What |
+|---|---|---|
+| `~/.config/omarchy/shell.json` | its own entry only | settings, and the resolved locker id |
+| `~/.local/state/omarchy/settings/weather.json` | read only | Omarchy's location, never modified |
+| `~/.local/state/priard.inair/history.json` | read and write | the trend: the locker code and its readings from the last 24 hours |
+
+The trend file is the only file the plugin creates. It is small (at most
+320 readings, capped at 64 KiB) and drops anything older than a day on every
+write. Because the locker code says roughly where you are, it is private
+from the moment it is created: mode 0600 in a 0700 directory. All access goes
+through `bin/inair-history`, which refuses a symlink, a FIFO, a file someone
+else owns or one that is too large, and writes through a fresh temporary file
+that is renamed over the old one. The data travels to it on stdin, never on
+the command line.
 
 ## Remove
 
@@ -252,10 +268,20 @@ file) and never modifies it. The trend history is kept in memory only.
 omarchy plugin remove priard.inair
 ```
 
-That deletes the plugin and its bar entry. Nothing else is left behind: no
-state files, no cache, no daemon, no system configuration. The only trace is
-the settings block inside `~/.config/omarchy/shell.json`, which goes with the
-bar entry. No privileges were granted, so none need revoking.
+That deletes the plugin and its bar entry, including its settings block in
+`~/.config/omarchy/shell.json`. There is no daemon, cache or system
+configuration to clean up, and no privileges were granted, so none need
+revoking.
+
+One file survives removal: the trend history,
+`~/.local/state/priard.inair/history.json`, which holds a locker code and a
+day of readings. Delete it, and its directory, yourself if you want no trace
+left:
+
+```bash
+rm ~/.local/state/priard.inair/history.json
+rmdir ~/.local/state/priard.inair
+```
 
 ## Credit
 

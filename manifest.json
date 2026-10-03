@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "priard.inair",
   "name": "inAir",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "author": "priard",
   "license": "MIT",
   "description": "Street-level air quality on your bar, from the public sensors on the parcel locker nearest you. Unofficial; not affiliated with InPost.",

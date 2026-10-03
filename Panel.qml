@@ -180,29 +180,45 @@ Panel {
 
   // ------------------------------------------------------------- history
 
-  // The readings of this session, oldest first, for the terminal skin's
-  // sparkline and trend arrows. Memory only — nothing is written anywhere — and
-  // reset whenever the plugin moves to another locker, so a trend never spans
-  // two streets.
+  // The readings of the last 24 hours, oldest first, for the terminal skin's
+  // sparkline and trend arrows. Kept across shell restarts in one private file
+  // (bin/inair-history, ~/.local/state/priard.inair/history.json) so that an
+  // update does not wipe the trend, and tied to one locker: moving to another
+  // starts over, so a trend never spans two streets.
   property var history: []
-  readonly property int historyLimit: 48
+  readonly property int historyLimit: 320
+  readonly property double historyWindow: 24 * 3600 * 1000
+
+  // Which locker the stored history has been looked up for, so it is read
+  // once per locker and not on every refresh.
+  property string historyLoadedFor: ""
+  property bool historyWritePending: false
 
   function remember(parsed) {
     var r = parsed.readings
+    var at = parsed.at.getTime()
     // Opening the panel also refreshes, so readings can arrive seconds apart;
     // a sample younger than a minute is replaced rather than added, which keeps
     // the sparkline a picture of time and not of how often the panel opened.
-    var next = history.slice(-(historyLimit - 1))
-    if (next.length > 0 && parsed.at - next[next.length - 1].at < 60000) next.pop()
+    var next = pruned(history)
+    if (next.length > 0 && at - next[next.length - 1].at < 60000) next.pop()
     next.push({
-      at: parsed.at,
+      at: at,
       pm25: Model.value(r, "pm25"),
       pm10: Model.value(r, "pm10"),
       temperature: Model.value(r, "temperature"),
       humidity: Model.value(r, "humidity"),
       pressure: Model.value(r, "pressure")
     })
-    history = next
+    history = next.slice(-historyLimit)
+    saveHistory()
+  }
+
+  function pruned(samples) {
+    var cutoff = Date.now() - historyWindow
+    var out = []
+    for (var i = 0; i < samples.length; i++) if (samples[i].at >= cutoff) out.push(samples[i])
+    return out
   }
 
   function series(field) {
@@ -210,6 +226,60 @@ Panel {
     for (var i = 0; i < history.length; i++) out.push(history[i][field])
     return out
   }
+
+  function loadHistory() {
+    if (lockerCode === "" || historyLoadedFor === lockerCode || historyReadProc.running) return
+    historyReadProc.buffer = ""
+    historyReadProc.code = lockerCode
+    historyReadProc.running = true
+  }
+
+  // Stored samples and the ones this session has already taken, merged by
+  // time. The helper has already held the file to its schema; this only
+  // checks the shape it relies on.
+  function adoptStoredHistory(raw, code) {
+    historyLoadedFor = code
+    var doc = null
+    try {
+      doc = JSON.parse(raw || "{}")
+    } catch (e) {
+      doc = null
+    }
+    if (!doc || doc.code !== code || code !== lockerCode || !Array.isArray(doc.samples)) {
+      if (historyWritePending) saveHistory()
+      return
+    }
+
+    var byTime = ({})
+    var merged = []
+    var all = doc.samples.slice(0, historyLimit).concat(history)
+    for (var i = 0; i < all.length; i++) {
+      var s = all[i]
+      if (!s || typeof s.at !== "number" || !isFinite(s.at) || byTime[s.at]) continue
+      byTime[s.at] = true
+      merged.push(s)
+    }
+    merged.sort(function(x, y) { return x.at - y.at })
+    history = pruned(merged).slice(-historyLimit)
+    if (historyWritePending) saveHistory()
+  }
+
+  // One write at a time; a sample that arrives while one is in flight is
+  // written right after it, carrying everything up to then.
+  function saveHistory() {
+    if (lockerCode === "" || history.length === 0) return
+    // Until the stored trend has been read back, a write would replace it with
+    // just this session's samples; wait for the read, which retries this.
+    if (historyLoadedFor !== lockerCode || historyWriteProc.running) {
+      historyWritePending = true
+      return
+    }
+    historyWritePending = false
+    historyWriteProc.payload = JSON.stringify({ code: lockerCode, samples: history })
+    historyWriteProc.running = true
+  }
+
+  onLockerCodeChanged: Qt.callLater(loadHistory)
 
   // ------------------------------------------------------ panel lifecycle
 
@@ -422,6 +492,7 @@ Panel {
   function restartResolution(pin) {
     air = null
     history = []
+    historyLoadedFor = ""
     locker = null
     manualPoint = null
     lockerCode = ""
@@ -518,6 +589,7 @@ Panel {
     idProc.signal(15)
     airProc.signal(15)
     pointProc.signal(15)
+    historyReadProc.signal(15)
   }
 
   // ------------------------------------------------------------ processes
@@ -534,6 +606,7 @@ Panel {
 
   readonly property string fetchHelper: pluginFile("bin/inair-fetch")
   readonly property string locationHelper: pluginFile("bin/inair-location")
+  readonly property string historyHelper: pluginFile("bin/inair-history")
   readonly property var helperEnvironment: ({ "PATH": "/usr/bin:/bin", "LC_ALL": "C" })
 
   function noteFailure(proc, message) {
@@ -775,6 +848,65 @@ Panel {
         root.remember(parsed)
         root.statusText = ""
       }
+    }
+  }
+
+  // The stored trend: read once per locker, written after every new sample.
+  // Both go through bin/inair-history, which owns the file, its permissions
+  // and its schema; the samples travel on stdin, never in argv, because a
+  // locker code says roughly where somebody lives.
+  Process {
+    id: historyReadProc
+    property string buffer: ""
+    property string code: ""
+    readonly property int maxBytes: 70000
+
+    command: ["/usr/bin/python3", "-I", "-S", root.historyHelper, "read"]
+    clearEnvironment: true
+    environment: root.helperEnvironment
+
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        historyReadProc.buffer += chunk
+        if (historyReadProc.buffer.length > historyReadProc.maxBytes) {
+          historyReadProc.buffer = ""
+          historyReadProc.signal(15)
+        }
+      }
+    }
+    // A refused or unreadable file only means no stored trend; the panel
+    // keeps working on what this session gathers.
+    stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
+
+    onExited: function(code, status) {
+      var raw = code === 0 ? historyReadProc.buffer : "{}"
+      historyReadProc.buffer = ""
+      root.adoptStoredHistory(raw, historyReadProc.code)
+      // The locker may have changed while the read was in flight.
+      if (root.lockerCode !== historyReadProc.code) root.loadHistory()
+    }
+  }
+
+  Process {
+    id: historyWriteProc
+    property string payload: ""
+
+    command: ["/usr/bin/python3", "-I", "-S", root.historyHelper, "write"]
+    clearEnvironment: true
+    environment: root.helperEnvironment
+    stdinEnabled: true
+
+    onStarted: {
+      write(historyWriteProc.payload)
+      historyWriteProc.payload = ""
+      stdinEnabled = false
+    }
+    stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
+
+    onExited: function(code, status) {
+      historyWriteProc.stdinEnabled = true
+      if (root.historyWritePending) root.saveHistory()
     }
   }
 
