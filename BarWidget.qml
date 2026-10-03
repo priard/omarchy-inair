@@ -64,10 +64,14 @@ BarWidget {
   readonly property color barSurface: Color.bar.background.a >= 0.5
     ? Color.bar.background : Color.background
 
-  readonly property color pillColor: root.label === ""
-    ? Color.bar.text : Model.readable(levelColor, barSurface, 3.5)
+  readonly property bool hasReading: panelLoader.item ? panelLoader.item.hasReading === true : false
 
-  visible: root.label !== ""
+  // Without a reading the pill keeps the bar's own text colour, dimmed: there
+  // is no index to colour it by, and a coloured dash would claim one.
+  readonly property color pillColor: hasReading
+    ? Model.readable(levelColor, barSurface, 3.5)
+    : Qt.rgba(Color.bar.text.r, Color.bar.text.g, Color.bar.text.b, 0.55)
+
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -98,7 +102,7 @@ BarWidget {
     horizontalMargin: 8.75
     verticalPadding: 8.75
     labelVisible: !root.vertical
-    hasVisualContent: root.label !== ""
+    hasVisualContent: true
     // Built from sensor numbers and an address the panel has already stripped
     // of markup and capped: the bar renders tooltips with a format this plugin
     // cannot pin to PlainText.

@@ -41,11 +41,27 @@ omarchy plugin add https://github.com/priard/omarchy-inair --enable --yes
 The widget lands in the centre of the bar. Move it with
 `omarchy bar move priard.inair --section right`.
 
-It needs a location to start from, and takes it from the one Omarchy already
-stores for the weather widget (`~/.local/state/omarchy/settings/weather.json`).
-If you have never set one, either set it in the Weather widget's panel or pin a
-locker code yourself (see Configure). This plugin never looks up your location
-from your IP address.
+### It needs coordinates or a locker code
+
+To find the nearest sensor, inAir needs your coordinates. It takes them from
+the location Omarchy stores for the weather widget
+(`~/.local/state/omarchy/settings/weather.json`). **By default Omarchy does
+not store one:** the weather follows your IP address, and a location set by
+name alone has no coordinates. In that case the pill shows `󰵃 —` and the panel
+tells you what is missing. Do one of the following:
+
+```bash
+# store a location with coordinates (name, then lat,lon)
+omarchy-weather-location --set "Kraków" 50.0614,19.9366
+
+# or skip the location and pin a locker that has a sensor
+omarchy bar set priard.inair locker KRA80M
+```
+
+The plugin picks a new location up within a minute. You can also open the
+panel, press `/` and type a locker code; it is printed on the locker and shown
+in the InPost app. This plugin never looks up your location from your IP
+address.
 
 ### Coming from InPost Air 0.3.0?
 

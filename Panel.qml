@@ -136,13 +136,15 @@ Panel {
   readonly property var levelMeta: Model.levelInfo(levelKey, scale)
   readonly property color levelColor: levelMeta.color
 
-  readonly property string label: {
-    var pm25 = Model.pillText(air)
-    return pm25 === "" ? "" : "󰵃 " + pm25
-  }
+  // The pill is always there, reading or not. It used to hide until the first
+  // reading arrived, and on a machine with no coordinates stored the first
+  // reading never came: the plugin looked uninstalled, and the panel that says
+  // what is missing could not be opened. A dash says "no number yet" instead.
+  readonly property bool hasReading: Model.pillText(air) !== ""
+  readonly property string label: hasReading ? "󰵃 " + Model.pillText(air) : "󰵃 —"
 
   readonly property string tooltip: {
-    if (!air) return statusText
+    if (!air) return statusText !== "" ? Model.plain(statusText, 160) : "inAir — click to set up"
     var head = lockerCode
     if (locker && locker.distance !== null) head += " · " + Model.formatDistance(locker.distance)
     var pm25 = Model.value(air.readings, "pm25")
@@ -323,9 +325,17 @@ Panel {
   function afterLocation() {
     if (!location || location.latitude === null || location.longitude === null) {
       discovering = false
-      statusText = pinnedCode === ""
-        ? "No location set — set one in the Weather widget, or type a locker code below"
-        : ""
+      // Omarchy keeps no coordinates until someone sets them: by default the
+      // weather follows the IP address, and a location set by name alone has
+      // no latitude or longitude. A pinned locker needs none of that, so go
+      // straight to it; otherwise say exactly what would help.
+      if (pinnedCode !== "") {
+        if (lockerId === "" && !pointProc.running) lookupCode(pinnedCode)
+        return
+      }
+      statusText = "No coordinates to search from. Press / and type a locker code"
+        + " (it is printed on the locker), or store your location:"
+        + " omarchy-weather-location --set NAME LAT,LON"
       return
     }
     nearbyProc.buffer = ""

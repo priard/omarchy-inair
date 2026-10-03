@@ -4,6 +4,26 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] — 2026-10-03
+
+### Fixed
+
+- **The plugin seemed not to install.** The pill stayed hidden until the
+  first reading. On a machine without stored coordinates, which is Omarchy's
+  default (the weather follows the IP address), that reading never came, and
+  the panel that explains what is missing could not be opened. The pill is
+  now always on the bar: a dimmed `󰵃 —` until there is a reading.
+- Without coordinates the panel now says what to do: type a locker code with
+  `/`, or store a location with `omarchy-weather-location --set NAME LAT,LON`.
+- A pinned locker now works without any location, including on a cold start
+  before its id has been cached. Before, discovery stopped at the missing
+  location and never looked the pinned code up.
+
+### Changed
+
+- The README's install section explains the coordinates requirement and both
+  ways around it.
+
 ## [0.4.1] — 2026-10-03
 
 ### Changed
@@ -102,5 +122,6 @@ Last release under the name **InPost Air** (`priard.inpost-air`).
   validated arguments. Nothing written outside the plugin's `shell.json`
   entry.
 
+[0.4.2]: https://github.com/priard/omarchy-inair/releases/tag/v0.4.2
 [0.4.1]: https://github.com/priard/omarchy-inair/releases/tag/v0.4.1
 [0.4.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.4.0
