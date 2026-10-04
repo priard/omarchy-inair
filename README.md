@@ -43,27 +43,34 @@ omarchy plugin add https://github.com/priard/omarchy-inair --enable --yes
 The widget lands in the centre of the bar. Move it with
 `omarchy bar move priard.inair --section right`.
 
-### It needs coordinates or a locker code
+### Finding a sensor
 
-To find the nearest sensor, inAir needs your coordinates. It takes them from
-the location Omarchy stores for the weather widget
-(`~/.local/state/omarchy/settings/weather.json`). **By default Omarchy does
-not store one:** the weather follows your IP address, and a location set by
-name alone has no coordinates. In that case the pill shows `󰵃 —` and the panel
-tells you what is missing. Do one of the following:
+inAir looks for the sensors nearest to you, and needs something to measure
+"nearest" from. It uses the location Omarchy stores for the weather widget
+(`~/.local/state/omarchy/settings/weather.json`), but **by default Omarchy
+stores none:** the weather follows your IP address, and a location set by name
+alone has no coordinates. Then the pill shows `󰵃 —` and the panel says what is
+missing. Any one of these gets it going:
 
-```bash
-# store a location with coordinates (name, then lat,lon)
-omarchy-weather-location --set "Kraków" 50.0614,19.9366
+- **Type your postcode.** Open the panel, press `/`, type e.g. `31-042` and
+  press Enter. The panel lists the sensors nearest to that postcode, with
+  distances, and starts reading the nearest one. The postcode is not stored;
+  the locker it found is, so the reading survives a restart.
+- **Set your location in the Weather widget.** Click the location in the
+  weather panel, type your town and pick it from the suggestions; that stores
+  coordinates. inAir notices within a minute and lists the sensors around you.
+- **Type a locker code**, e.g. `KRA80M`, the same way. It pins that locker and
+  lists the sensors around it.
+- From a terminal:
 
-# or skip the location and pin a locker that has a sensor
-omarchy bar set priard.inair locker KRA80M
-```
+  ```bash
+  omarchy-weather-location --set "Kraków" 50.0614,19.9366   # name, then lat,lon
+  omarchy bar set priard.inair locker KRA80M                # or pin a locker
+  ```
 
-The plugin picks a new location up within a minute. You can also open the
-panel, press `/` and type a locker code; it is printed on the locker and shown
-in the InPost app. This plugin never looks up your location from your IP
-address.
+The search looks at the 300 nearest lockers, which reaches about 10 km from a
+village and a few km in a city. This plugin never looks up your location from
+your IP address.
 
 ### Update
 
@@ -127,7 +134,7 @@ Inside the panel, the header buttons and their keys:
 
 | Button | Key | Does |
 |---|---|---|
-| 󰍉 | `/` or `c` | Opens a field for a locker code, e.g. `KRA80M`. Enter accepts, Escape cancels. The locker can be anywhere in Poland; it does not have to be in range. |
+| 󰍉 | `/` or `c` | Opens the search field. A **postcode** (`31-042`) lists the sensors around it and reads the nearest if nothing is being read yet; a **locker code** (`KRA80M`) pins that locker, anywhere in Poland, and lists the sensors around it. Enter searches, Escape cancels. |
 | `PL` / `EU` | `i` | Shows which index is in use; click to switch. |
 | 󰕮 / 󰆍 | `s` | Switches between the terminal and the plain skin. |
 | 󰑐 | `r` | Refreshes the readings and re-scans for sensors nearby. Spins while it works. |
@@ -233,25 +240,30 @@ omarchy bar set priard.inair style plain
 | `index` | `"polish"` | `"polish"` for the GIOŚ scale, `"european"` for the EEA one. |
 | `style` | `"terminal"` | `"terminal"` for the character-grid skin, `"plain"` for ordinary widgets. |
 | `refreshMinutes` | `5` | How often to re-read the sensor, clamped to 1–60. |
-| `resolvedCode`, `resolvedId` | — | Written by the plugin: the locker it settled on and its numeric id, so the next session skips discovery. Delete them to force a fresh look. |
+| `resolvedCode`, `resolvedId` | — | Written by the plugin: the locker it settled on and its numeric id, so the next session skips discovery. Delete them to force a fresh look, but see below. |
 
 Not every locker with a sensor has a public page, and without that page there
 is no numeric id and so no readings. When that happens the plugin moves on to
-the next sensor in range instead of reporting a failure.
+the next sensor in range instead of reporting a failure. InPost also takes
+pages down now and then while the sensor keeps reporting; a locker whose id is
+already cached keeps working, which is one more reason not to delete
+`resolvedId` without need.
 
 ## What it talks to, and what it writes
 
-Three public InPost endpoints. No account, no API key, no credential of any
+Public InPost endpoints only. No account, no API key, no credential of any
 kind:
 
 | Endpoint | When | What for |
 |---|---|---|
-| `GET api-shipx-pl.easypack24.net/v1/points?relative_point=…` | on discovery, at most hourly | which lockers near you have a sensor |
+| `GET api-shipx-pl.easypack24.net/v1/points?relative_point=…` | on discovery, at most hourly; after a locker code is typed | which lockers near you, or near that locker, have a sensor |
+| `GET api-shipx-pl.easypack24.net/v1/points?relative_post_code=…` | when you search a postcode | which lockers near that postcode have a sensor |
+| `GET api-shipx-pl.easypack24.net/v1/points/<code>` | when you type or pin a locker code | that locker's address, location and whether it has a sensor |
 | `GET inpost.pl/<locker-page>` | once per locker, then cached | the locker's numeric id |
 | `POST inpost.pl/shipx-point-data/<id>/<code>/air_index_level` | every `refreshMinutes` | the readings |
 
-Your coordinates go to InPost's locker search, the same way they would if you
-used their locker finder. Nothing else leaves the machine. Requests identify
+Your coordinates, or a postcode you search for, go to InPost's locker search,
+the same way they would if you used their locker finder. Nothing else leaves the machine. Requests identify
 themselves with the user agent `omarchy-inair`.
 
 Every request goes through `bin/inair-fetch`. It only accepts arguments that

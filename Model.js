@@ -258,13 +258,21 @@ function effectiveLevel(air, scale) {
 
 // ------------------------------------------------------- locker discovery
 
-// ShipX geo search: 25 points by default, up to 100 with `limit`. Cheap enough
-// to ask for 100 every time — air-equipped lockers are sparse, and a widget
-// that only looked at the 25 nearest would miss the sensor two streets over.
+// ShipX geo search: 25 points by default, up to 500 with `limit`. The helper
+// asks for 300 with only the fields read here — air-equipped lockers are
+// sparse, and outside a city the 100 nearest points cover just a few km.
 function nearbyUrl(latitude, longitude, limit) {
   return "https://api-shipx-pl.easypack24.net/v1/points"
     + "?relative_point=" + encodeURIComponent(latitude + "," + longitude)
-    + "&limit=" + (limit || 100)
+    + "&limit=" + (limit || 300)
+}
+
+// A Polish postcode as typed — "31-042" or "31042" — in the NN-NNN form ShipX
+// expects, or "" for anything else. What decides whether the search box looks
+// for lockers near a place or reads one locker by its code.
+function normalizePostcode(text) {
+  var match = /^\s*([0-9]{2})-?([0-9]{3})\s*$/.exec(String(text || ""))
+  return match ? match[1] + "-" + match[2] : ""
 }
 
 function pointUrl(code) {
@@ -318,7 +326,7 @@ function parseNearby(raw, limit) {
   }
 
   var items = data && Array.isArray(data.items) ? data.items : []
-  var scanned = Math.min(items.length, 200)
+  var scanned = Math.min(items.length, 400)
   var out = []
   for (var i = 0; i < scanned; i++) {
     var point = normalizePoint(items[i])
@@ -900,6 +908,7 @@ if (typeof module !== "undefined") {
     computeIndex: computeIndex,
     effectiveLevel: effectiveLevel,
     nearbyUrl: nearbyUrl,
+    normalizePostcode: normalizePostcode,
     pointUrl: pointUrl,
     parseNearby: parseNearby,
     parsePoint: parsePoint,

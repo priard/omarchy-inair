@@ -136,7 +136,7 @@ Item {
 
         PanelActionButton {
           iconText: "󰍉"
-          tooltipText: "Look up a locker by code  [/]"
+          tooltipText: "Find sensors near a postcode, or a locker by its code  [/]"
           foreground: view.searching ? view.levelColor : view.dim
           hoverColor: view.foreground
           fontFamily: view.fontFamily
@@ -355,7 +355,7 @@ Item {
       TextField {
         id: codeField
         width: parent.width - Style.space(64)
-        placeholderText: "Locker code, e.g. KRA80M"
+        placeholderText: "Postcode or locker code, e.g. 31-042 or KRA80M"
         foreground: view.foreground
         font.family: view.fontFamily
         // The code goes into a URL; the helper enforces the same alphabet
@@ -376,7 +376,7 @@ Item {
 
       PanelActionButton {
         iconText: "󰄬"
-        tooltipText: "Use this locker"
+        tooltipText: "Search"
         foreground: view.dim
         hoverColor: view.levelColor
         fontFamily: view.fontFamily
@@ -794,7 +794,8 @@ Item {
         PanelSectionHeader {
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: "SENSORS IN RANGE"
+          text: view.panel && view.panel.searchOrigin !== ""
+            ? "SENSORS NEAR " + view.panel.searchOrigin : "SENSORS IN RANGE"
           foreground: view.dim
           fontFamily: view.fontFamily
         }
@@ -928,7 +929,7 @@ Item {
       width: column.innerWidth
       wrapMode: Text.WordWrap
       textFormat: Text.PlainText
-      text: "Keys: / code · i index · s skin · r refresh — right-click the pill for the index, middle-click to refresh"
+      text: "Keys: / find · i index · s skin · r refresh — right-click the pill for the index, middle-click to refresh"
       color: view.faint
       font.family: view.fontFamily
       font.pixelSize: Style.font.caption

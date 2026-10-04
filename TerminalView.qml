@@ -122,7 +122,7 @@ Item {
 
         ActionGlyph {
           glyph: "󰍉"
-          tip: "Look up a locker by code  [/]"
+          tip: "Find sensors near a postcode, or a locker by its code  [/]"
           on: view.panel !== null && view.panel.searching
           onActivated: {
             if (!view.panel) return
@@ -271,7 +271,7 @@ Item {
 
       GridLine {
         id: promptLine
-        line: Model.frameRow("code › " + Model.repeat("_", Math.max(4, view.inner - 7)), view.cols)
+        line: Model.frameRow("find › " + Model.repeat("_", Math.max(4, view.inner - 7)), view.cols)
         color: view.dim
       }
 
@@ -449,7 +449,8 @@ Item {
 
     // ---- sensors in range
     GridLine {
-      line: Model.frameSection("SENSORS IN RANGE", view.cols)
+      line: Model.frameSection(view.panel && view.panel.searchOrigin !== ""
+        ? "SENSORS NEAR " + view.panel.searchOrigin : "SENSORS IN RANGE", view.cols)
       visible: view.panel !== null && view.panel.candidates.length > 0
     }
 
@@ -543,7 +544,7 @@ Item {
 
     // ---- the shortcut legend, in the bottom rule's voice
     GridRow {
-      segments: [{ text: Model.padRight("/ code · i index · s skin · r refresh", view.inner),
+      segments: [{ text: Model.padRight("/ find · i index · s skin · r refresh", view.inner),
                    color: view.faint }]
     }
 

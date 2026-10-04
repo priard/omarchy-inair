@@ -4,6 +4,42 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] — 2026-10-04
+
+### Added
+
+- **Search by postcode.** The search field (`/`) takes a Polish postcode as
+  well as a locker code. A postcode lists the sensors nearest to it, with
+  distances measured from it, and starts reading the nearest one when nothing
+  is being read yet. No location and no geocoder are needed: ShipX sorts by
+  distance from the postcode itself, and the postcode goes to InPost alone.
+  It is not stored; the locker it found is cached like any other.
+- **A typed locker code lists its neighbours.** Pinning a locker by code, when
+  it is not already in the list, now also lists the sensors around it.
+- The list heading says what the distances are measured from:
+  "SENSORS NEAR 31-042", "SENSORS NEAR KRA80M", or "SENSORS IN RANGE".
+
+### Changed
+
+- **Wider search.** Locker searches look at the 300 nearest points instead of
+  100, asking only for the fields the widget reads, so the larger search is a
+  smaller download (about 115 KB instead of about 90 KB for 100). From a
+  village that reaches 10 km and more instead of about five.
+- Without a location the panel now suggests the postcode first, then the
+  Weather widget (picking a suggestion there stores coordinates), then a
+  locker code.
+
+### Fixed
+
+- **A cached locker was forgotten at start-up without a location.** The cache
+  was only read when the panel finished loading, which can be before its
+  settings arrive. With a location, discovery found the locker again and hid
+  this; without one, the reading was gone after every restart. The cache is
+  now also adopted when the settings arrive, and the locker's address is
+  fetched for it.
+- README: the endpoint table lists the single-locker lookup, which the plugin
+  has always used.
+
 ## [0.7.0] — 2026-10-04
 
 ### Changed
@@ -186,6 +222,7 @@ Last release under the name **InPost Air** (`priard.inpost-air`).
   validated arguments. Nothing written outside the plugin's `shell.json`
   entry.
 
+[0.8.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.8.0
 [0.7.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.7.0
 [0.6.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.6.0
 [0.5.1]: https://github.com/priard/omarchy-inair/releases/tag/v0.5.1

@@ -129,8 +129,14 @@ Panel {
   property var manualPoint: null
   property bool searching: false
 
+  // What the sensor list was last found around, when it came from the search
+  // box rather than from the stored location: a postcode, or the code of a
+  // locker typed in. Shown in the list's heading so the distances say what
+  // they are measured from.
+  property string searchOrigin: ""
+
   readonly property bool busy: locationProc.running || nearbyProc.running
-    || idProc.running || airProc.running || pointProc.running
+    || idProc.running || airProc.running || pointProc.running || postcodeProc.running || aroundProc.running
 
   readonly property string levelKey: Model.effectiveLevel(air, scale)
   readonly property var levelMeta: Model.levelInfo(levelKey, scale)
@@ -399,15 +405,21 @@ Panel {
       discovering = false
       // Omarchy keeps no coordinates until someone sets them: by default the
       // weather follows the IP address, and a location set by name alone has
-      // no latitude or longitude. A pinned locker needs none of that, so go
-      // straight to it; otherwise say exactly what would help.
-      if (pinnedCode !== "") {
-        if (lockerId === "" && !pointProc.running) lookupCode(pinnedCode)
+      // no latitude or longitude. A locker already being read — found earlier
+      // from a postcode, or cached — keeps working without one; only its
+      // address has to be fetched, since no search brought it this time.
+      if (lockerId !== "") {
+        lookupDetails()
         return
       }
-      statusText = "No coordinates to search from. Press / and type a locker code"
-        + " (it is printed on the locker), or store your location:"
-        + " omarchy-weather-location --set NAME LAT,LON"
+      // A pinned locker needs no location either: go straight to it.
+      if (pinnedCode !== "") {
+        if (!pointProc.running) lookupCode(pinnedCode)
+        return
+      }
+      statusText = "No location to search from. Press / and type your postcode"
+        + " (e.g. 31-042) or a locker code, or set your location in the"
+        + " Weather widget and pick it from the suggestions."
       return
     }
     nearbyProc.buffer = ""
@@ -533,14 +545,39 @@ Panel {
     return /^[A-Z0-9_-]{1,32}$/.test(code) ? code : ""
   }
 
+  // The search box takes two things. A postcode lists the sensors around it,
+  // nearest first, without storing anything; a locker code pins that locker.
   function submitCode(text) {
+    var postcode = Model.normalizePostcode(text)
+    if (postcode !== "") {
+      stopSearching()
+      findNear(postcode)
+      return
+    }
     var code = normalizeCode(text)
     if (code === "") {
-      statusText = "A locker code looks like KRA80M — letters, digits, dash or underscore"
+      statusText = "Type a postcode like 31-042, or a locker code like KRA80M"
       return
     }
     stopSearching()
     pinLocker(code)
+  }
+
+  function findAround(point) {
+    if (aroundProc.running) return
+    aroundProc.buffer = ""
+    aroundProc.origin = point.code
+    aroundProc.latitude = Number(point.latitude).toFixed(6)
+    aroundProc.longitude = Number(point.longitude).toFixed(6)
+    aroundProc.running = true
+  }
+
+  function findNear(postcode) {
+    if (postcodeProc.running) return
+    statusText = ""
+    postcodeProc.buffer = ""
+    postcodeProc.postcode = postcode
+    postcodeProc.running = true
   }
 
   function lookupCode(code) {
@@ -579,6 +616,26 @@ Panel {
     return true
   }
 
+  // The address of the locker being read, when no search has supplied it.
+  function lookupDetails() {
+    if (locker || lockerCode === "" || pointProc.running) return
+    lookupCode(lockerCode)
+  }
+
+  // The cached locker is in the settings, and at start-up the settings can
+  // arrive after this panel has completed. Adopting the cache only in
+  // onCompleted missed it then; with a location it did not matter, because
+  // discovery found the locker again, but without one the reading was simply
+  // gone after a restart. So the cache is also taken the moment it appears.
+  onCachedIdChanged: Qt.callLater(adoptLateCache)
+
+  function adoptLateCache() {
+    if (lockerId !== "" || !adoptCache()) return
+    statusText = ""
+    startAir()
+    if (!location || location.latitude === null || location.longitude === null) lookupDetails()
+  }
+
   Component.onCompleted: {
     appliedPin = pinnedCode
     if (adoptCache()) startAir()
@@ -591,6 +648,8 @@ Panel {
     idProc.signal(15)
     airProc.signal(15)
     pointProc.signal(15)
+    postcodeProc.signal(15)
+    aroundProc.signal(15)
     historyReadProc.signal(15)
   }
 
@@ -699,6 +758,7 @@ Panel {
         return
       }
       root.candidates = Model.parseNearby(nearbyProc.buffer)
+      root.searchOrigin = ""
       nearbyProc.buffer = ""
       root.candidatesFetchedAt = Date.now()
 
@@ -718,6 +778,95 @@ Panel {
         }
       }
       root.resolveFrom(0)
+    }
+  }
+
+  // Sensors around a postcode typed into the search box. The list replaces
+  // the one in the panel; when nothing is being read yet — no location, no
+  // pin — the nearest sensor that answers is adopted too, so a postcode is
+  // all it takes to get a reading. Its id is cached like any other, and the
+  // locker keeps being read after a restart.
+  Process {
+    id: postcodeProc
+    property string buffer: ""
+    property string postcode: ""
+    readonly property int maxBytes: 600000
+
+    command: ["/usr/bin/bash", root.fetchHelper, "postcode", postcodeProc.postcode]
+    clearEnvironment: true
+    environment: root.helperEnvironment
+
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        postcodeProc.buffer += chunk
+        if (postcodeProc.buffer.length > postcodeProc.maxBytes) {
+          postcodeProc.buffer = ""
+          postcodeProc.signal(15)
+        }
+      }
+    }
+    stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
+
+    onExited: function(code, status) {
+      var raw = postcodeProc.buffer
+      postcodeProc.buffer = ""
+      // curl exits 22 on an HTTP error, which is how ShipX answers a postcode
+      // it does not know.
+      if (code === 22) {
+        root.statusText = "InPost does not know the postcode " + postcodeProc.postcode
+        return
+      }
+      if (code !== 0) {
+        root.statusText = "Could not reach InPost"
+        return
+      }
+      var found = Model.parseNearby(raw)
+      if (found.length === 0) {
+        root.statusText = "No air sensor near " + postcodeProc.postcode
+        return
+      }
+      root.candidates = found
+      root.searchOrigin = postcodeProc.postcode
+      root.candidatesFetchedAt = Date.now()
+      if (root.lockerId === "" && root.pinnedCode === "") root.resolveFrom(0)
+    }
+  }
+
+  // Sensors around a locker typed in by code, for the list only: the typed
+  // locker itself is pinned and read through the usual path.
+  Process {
+    id: aroundProc
+    property string buffer: ""
+    property string origin: ""
+    property string latitude: "0"
+    property string longitude: "0"
+    readonly property int maxBytes: 600000
+
+    command: ["/usr/bin/bash", root.fetchHelper, "nearby", aroundProc.latitude, aroundProc.longitude]
+    clearEnvironment: true
+    environment: root.helperEnvironment
+
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        aroundProc.buffer += chunk
+        if (aroundProc.buffer.length > aroundProc.maxBytes) {
+          aroundProc.buffer = ""
+          aroundProc.signal(15)
+        }
+      }
+    }
+    stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
+
+    onExited: function(code, status) {
+      var found = code === 0 ? Model.parseNearby(aroundProc.buffer) : []
+      aroundProc.buffer = ""
+      // Only while that locker is still the one asked for.
+      if (found.length === 0 || root.pinnedCode !== aroundProc.origin) return
+      root.candidates = found
+      root.searchOrigin = aroundProc.origin
+      root.candidatesFetchedAt = Date.now()
     }
   }
 
@@ -753,6 +902,11 @@ Panel {
         root.statusText = "No locker called " + pointProc.code
         return
       }
+      // Only the address of the locker already being read was wanted.
+      if (root.lockerId !== "" && point.code === root.lockerCode) {
+        if (!root.locker) root.locker = point
+        return
+      }
       if (!point.hasSensor) {
         root.statusText = point.code + " has no air sensor"
         return
@@ -760,6 +914,10 @@ Panel {
 
       root.manualPoint = point
       root.resolveFrom(0)
+      // A locker typed in by hand is often somewhere else entirely; list the
+      // sensors around it too, so its neighbours are one click away.
+      if (point.latitude !== null && point.longitude !== null && !root.inCandidates(point.code))
+        root.findAround(point)
     }
   }
 
