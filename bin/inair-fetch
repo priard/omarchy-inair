@@ -12,6 +12,13 @@
 # from InPost's own API, which is to say from the network, which is to say it
 # is untrusted.
 #
+# They also never sit on a command line. Coordinates, a postcode, a locker
+# code or the slug of its page all say where somebody lives, and every
+# process's argv is readable in /proc by anyone on the machine. So the widget
+# passes them on stdin (`inair-fetch nearby` with "LAT LON" on stdin), and
+# curl gets its URL from a config on stdin as well. Passing them as arguments
+# still works, for running the helper by hand.
+#
 # Endpoints, all public, all unauthenticated — no credential ever travels here:
 #   nearby    GET  api-shipx-pl.easypack24.net/v1/points?relative_point=…
 #   postcode  GET  api-shipx-pl.easypack24.net/v1/points?relative_post_code=…
@@ -47,16 +54,25 @@ die() {
 # curl -q first so ~/.curlrc cannot add a second URL or a redirect; no -L, so a
 # redirect is a failure rather than a silent hop to somewhere else; --noproxy
 # so an environment proxy cannot see or rewrite the traffic.
+#
+# The URL reaches curl through `-K -`, a config read from stdin, rather than
+# as an argument. A config line is a parser boundary, so the URL is held to a
+# closed alphabet first: every part of it has already matched an anchored
+# pattern, and this check makes sure no quote, backslash, space or newline —
+# anything that could end the value or start another directive — got through.
 fetch() {
   local url="$1" max="$2"
   shift 2
 
+  [[ $url =~ ^https://[A-Za-z0-9.-]+/[A-Za-z0-9./?=\&,_:-]*$ ]] || die "refusing URL"
+
   local out
-  out=$("$SETSID" -w "$TIMEOUT" -k 2 -- 20 \
-        "$CURL" -q -sS --fail \
-          --proto '=https' --proto-redir '=https' --noproxy '*' \
-          --connect-timeout 5 --max-time 15 --max-filesize "$max" \
-          -A "$UA" "$@" -- "$url" \
+  out=$(printf 'url = "%s"\n' "$url" \
+        | "$SETSID" -w "$TIMEOUT" -k 2 -- 20 \
+          "$CURL" -q -sS --fail \
+            --proto '=https' --proto-redir '=https' --noproxy '*' \
+            --connect-timeout 5 --max-time 15 --max-filesize "$max" \
+            -A "$UA" "$@" -K - \
         | "$HEAD" -c $((max + 1)))
   local rc=$?
 
@@ -143,11 +159,23 @@ cmd_air() {
     -X POST -H 'X-Requested-With: XMLHttpRequest'
 }
 
-case "${1:-}" in
-  nearby) shift; cmd_nearby "$@" ;;
-  postcode) shift; cmd_postcode "$@" ;;
-  point)  shift; cmd_point "$@" ;;
-  id)     shift; cmd_id "$@" ;;
-  air)    shift; cmd_air "$@" ;;
-  *)      die "usage: inair-fetch nearby LAT LON | postcode NN-NNN | point CODE | id SLUG | air ID CODE" ;;
+# The arguments of a subcommand: from argv when given there (by hand), else
+# one line of at most 512 bytes on stdin, split on spaces. Each is validated by
+# the subcommand before it is used.
+COMMAND="${1:-}"
+shift || true
+if [ "$#" -eq 0 ]; then
+  line=""
+  IFS= read -r -t 5 -n 512 line || [ -n "$line" ] || die "no arguments on stdin"
+  read -r -a ARGS <<<"$line"
+  set -- "${ARGS[@]}"
+fi
+
+case "$COMMAND" in
+  nearby) cmd_nearby "$@" ;;
+  postcode) cmd_postcode "$@" ;;
+  point)  cmd_point "$@" ;;
+  id)     cmd_id "$@" ;;
+  air)    cmd_air "$@" ;;
+  *)      die "usage: inair-fetch nearby|postcode|point|id|air, arguments on stdin: LAT LON | NN-NNN | CODE | SLUG | ID CODE" ;;
 esac

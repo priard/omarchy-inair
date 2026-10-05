@@ -268,7 +268,10 @@ themselves with the user agent `omarchy-inair`.
 
 Every request goes through `bin/inair-fetch`. It only accepts arguments that
 match fixed patterns, refuses redirects and proxies, caps the size of every
-response, and kills the request after a deadline.
+response, and kills the request after a deadline. What a request is about
+(coordinates, a postcode, a locker code) never appears on a command line,
+where any user of the machine could read it in `/proc`: the widget hands it to
+the helper on stdin, and the helper hands the URL to curl the same way.
 
 Files:
 

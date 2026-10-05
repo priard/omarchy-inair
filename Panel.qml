@@ -727,10 +727,14 @@ Panel {
     // ceiling, so a helper that ever grew its cap cannot grow the shell's heap.
     readonly property int maxBytes: 600000
 
-    command: root.location
-      ? ["/usr/bin/bash", root.fetchHelper, "nearby",
-         String(root.location.latitude), String(root.location.longitude)]
-      : ["/usr/bin/bash", root.fetchHelper, "nearby", "0", "0"]
+    command: ["/usr/bin/bash", root.fetchHelper, "nearby"]
+    // What to fetch goes on stdin, not in argv: a coordinate, postcode or
+    // locker code says where somebody lives, and argv is public in /proc.
+    stdinEnabled: true
+    onStarted: {
+      write(root.location ? Number(root.location.latitude).toFixed(6) + " " + Number(root.location.longitude).toFixed(6) : "0 0" + "\n")
+      stdinEnabled = false
+    }
     clearEnvironment: true
     environment: root.helperEnvironment
 
@@ -745,12 +749,10 @@ Panel {
         }
       }
     }
-    stderr: SplitParser {
-      splitMarker: ""
-      onRead: function(chunk) { root.noteFailure(nearbyProc, chunk) }
-    }
+    stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
 
     onExited: function(code, status) {
+      nearbyProc.stdinEnabled = true
       if (code !== 0) {
         root.discovering = false
         nearbyProc.buffer = ""
@@ -792,7 +794,14 @@ Panel {
     property string postcode: ""
     readonly property int maxBytes: 600000
 
-    command: ["/usr/bin/bash", root.fetchHelper, "postcode", postcodeProc.postcode]
+    command: ["/usr/bin/bash", root.fetchHelper, "postcode"]
+    // What to fetch goes on stdin, not in argv: a coordinate, postcode or
+    // locker code says where somebody lives, and argv is public in /proc.
+    stdinEnabled: true
+    onStarted: {
+      write(postcodeProc.postcode + "\n")
+      stdinEnabled = false
+    }
     clearEnvironment: true
     environment: root.helperEnvironment
 
@@ -809,6 +818,7 @@ Panel {
     stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
 
     onExited: function(code, status) {
+      postcodeProc.stdinEnabled = true
       var raw = postcodeProc.buffer
       postcodeProc.buffer = ""
       // curl exits 22 on an HTTP error, which is how ShipX answers a postcode
@@ -843,7 +853,14 @@ Panel {
     property string longitude: "0"
     readonly property int maxBytes: 600000
 
-    command: ["/usr/bin/bash", root.fetchHelper, "nearby", aroundProc.latitude, aroundProc.longitude]
+    command: ["/usr/bin/bash", root.fetchHelper, "nearby"]
+    // What to fetch goes on stdin, not in argv: a coordinate, postcode or
+    // locker code says where somebody lives, and argv is public in /proc.
+    stdinEnabled: true
+    onStarted: {
+      write(aroundProc.latitude + " " + aroundProc.longitude + "\n")
+      stdinEnabled = false
+    }
     clearEnvironment: true
     environment: root.helperEnvironment
 
@@ -860,6 +877,7 @@ Panel {
     stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
 
     onExited: function(code, status) {
+      aroundProc.stdinEnabled = true
       var found = code === 0 ? Model.parseNearby(aroundProc.buffer) : []
       aroundProc.buffer = ""
       // Only while that locker is still the one asked for.
@@ -878,7 +896,14 @@ Panel {
     property string code: ""
     readonly property int maxBytes: 32000
 
-    command: ["/usr/bin/bash", root.fetchHelper, "point", pointProc.code]
+    command: ["/usr/bin/bash", root.fetchHelper, "point"]
+    // What to fetch goes on stdin, not in argv: a coordinate, postcode or
+    // locker code says where somebody lives, and argv is public in /proc.
+    stdinEnabled: true
+    onStarted: {
+      write(pointProc.code + "\n")
+      stdinEnabled = false
+    }
     clearEnvironment: true
     environment: root.helperEnvironment
 
@@ -895,6 +920,7 @@ Panel {
     stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
 
     onExited: function(code, status) {
+      pointProc.stdinEnabled = true
       var point = code === 0 ? Model.parsePoint(pointProc.buffer) : null
       pointProc.buffer = ""
 
@@ -927,7 +953,14 @@ Panel {
     property string slug: ""
     readonly property int maxBytes: 4096
 
-    command: ["/usr/bin/bash", root.fetchHelper, "id", idProc.slug]
+    command: ["/usr/bin/bash", root.fetchHelper, "id"]
+    // What to fetch goes on stdin, not in argv: a coordinate, postcode or
+    // locker code says where somebody lives, and argv is public in /proc.
+    stdinEnabled: true
+    onStarted: {
+      write(idProc.slug + "\n")
+      stdinEnabled = false
+    }
     clearEnvironment: true
     environment: root.helperEnvironment
 
@@ -946,6 +979,7 @@ Panel {
     stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
 
     onExited: function(code, status) {
+      idProc.stdinEnabled = true
       var parsed = null
       if (code === 0) {
         try {
@@ -973,7 +1007,14 @@ Panel {
     property string buffer: ""
     readonly property int maxBytes: 24000
 
-    command: ["/usr/bin/bash", root.fetchHelper, "air", root.lockerId, root.lockerCode]
+    command: ["/usr/bin/bash", root.fetchHelper, "air"]
+    // What to fetch goes on stdin, not in argv: a coordinate, postcode or
+    // locker code says where somebody lives, and argv is public in /proc.
+    stdinEnabled: true
+    onStarted: {
+      write(root.lockerId + " " + root.lockerCode + "\n")
+      stdinEnabled = false
+    }
     clearEnvironment: true
     environment: root.helperEnvironment
 
@@ -988,17 +1029,21 @@ Panel {
         }
       }
     }
-    stderr: SplitParser {
-      splitMarker: ""
-      onRead: function(chunk) { root.statusText = Model.plain(chunk, 120) }
-    }
+    // curl's own error text is not shown: it arrives in pieces, so a piece
+    // could replace the whole, and it speaks HTTP rather than English. The
+    // exit status says enough to put it in words.
+    stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
 
     onExited: function(code, status) {
+      airProc.stdinEnabled = true
       if (code !== 0) {
         airProc.buffer = ""
         // The previous reading stays on screen; a locker that has gone quiet
-        // for a minute is not a reason to blank the bar.
-        if (root.statusText === "") root.statusText = "Sensor unreachable"
+        // for a minute is not a reason to blank the bar. curl exits 22 on an
+        // HTTP error: InPost answering 404 for a locker that used to report.
+        root.statusText = code === 22
+          ? "InPost is not publishing readings for " + root.lockerCode + " right now"
+          : "Sensor unreachable"
         return
       }
       var parsed = Model.parseAirResponse(airProc.buffer)

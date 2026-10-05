@@ -17,6 +17,7 @@ never an IP lookup behind the user's back.
 import json
 import os
 import pwd
+import signal
 import stat
 import sys
 
@@ -92,6 +93,9 @@ def coordinate(value, limit):
 
 
 def main():
+    # Run from the shell, which waits on its stdout: an absolute deadline keeps
+    # anything that stalls here from holding the helper forever.
+    signal.alarm(10)
     try:
         dirfd = open_state_dir()
     except FileNotFoundError:

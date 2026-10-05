@@ -4,6 +4,30 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.1] — 2026-10-05
+
+### Changed
+
+- **No location data on command lines.** Coordinates, postcodes, locker codes
+  and locker page addresses used to be passed to `bin/inair-fetch` and on to
+  curl as arguments, which any user of the machine can read in
+  `/proc/<pid>/cmdline`. The widget now writes them to the helper's stdin, and
+  the helper gives curl its URL through a config on stdin (`-K -`), after
+  checking that the URL holds nothing that could end the value or start
+  another directive. Running the helper by hand with arguments still works.
+- `bin/inair-location` gives up after 10 seconds, like the history helper.
+- Coordinates from the weather file are rounded to six decimals before they
+  are sent, which the helper's pattern accepts; a location stored with more
+  decimals used to be refused.
+
+### Fixed
+
+- **A clearer message when a locker stops reporting.** InPost sometimes stops
+  publishing readings for a locker (its readings endpoint answers 404). The
+  panel used to show curl's own error, often cut in half because it arrives
+  in pieces ("url: (22) …"); it now says that InPost is not publishing
+  readings for that locker right now. The last reading stays on screen.
+
 ## [0.8.0] — 2026-10-04
 
 ### Added
@@ -222,6 +246,7 @@ Last release under the name **InPost Air** (`priard.inpost-air`).
   validated arguments. Nothing written outside the plugin's `shell.json`
   entry.
 
+[0.8.1]: https://github.com/priard/omarchy-inair/releases/tag/v0.8.1
 [0.8.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.8.0
 [0.7.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.7.0
 [0.6.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.6.0
