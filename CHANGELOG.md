@@ -4,6 +4,25 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] — 2026-10-07
+
+### Fixed
+
+- **Say why there are no readings.** Since 7 October 2026 InPost answers
+  every automated request for readings with HTTP 403 from a Cloudflare rule.
+  The panel showed only "InPost is not publishing readings for … right now",
+  as if one locker had gone quiet. The helper's error output is now collected
+  whole and the HTTP status read from it, so the panel tells a block (403)
+  from a locker without data (404), rate limiting (429), a failing server
+  (5xx), no network and a timeout, each in words. The message for a block
+  says it cannot be fixed in the plugin and points to the README.
+
+### Changed
+
+- README: a notice at the top about the block, what still works, why inAir
+  will not work around it, and that removal from the Omarchy plugin
+  marketplace has been requested.
+
 ## [0.8.1] — 2026-10-05
 
 ### Changed
@@ -246,6 +265,7 @@ Last release under the name **InPost Air** (`priard.inpost-air`).
   validated arguments. Nothing written outside the plugin's `shell.json`
   entry.
 
+[0.8.2]: https://github.com/priard/omarchy-inair/releases/tag/v0.8.2
 [0.8.1]: https://github.com/priard/omarchy-inair/releases/tag/v0.8.1
 [0.8.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.8.0
 [0.7.0]: https://github.com/priard/omarchy-inair/releases/tag/v0.7.0

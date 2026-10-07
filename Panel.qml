@@ -1029,21 +1029,27 @@ Panel {
         }
       }
     }
-    // curl's own error text is not shown: it arrives in pieces, so a piece
-    // could replace the whole, and it speaks HTTP rather than English. The
-    // exit status says enough to put it in words.
-    stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
+    // curl's error text arrives in pieces, so it is collected whole (capped)
+    // and only read once the process is done: it carries the HTTP status that
+    // tells a block (403) from a locker gone quiet (404). It is never shown
+    // as is; Model.fetchFailure puts it in words.
+    property string errors: ""
+    stderr: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        if (airProc.errors.length < 1024) airProc.errors = (airProc.errors + chunk).slice(0, 1024)
+      }
+    }
 
     onExited: function(code, status) {
       airProc.stdinEnabled = true
+      var errors = airProc.errors
+      airProc.errors = ""
       if (code !== 0) {
         airProc.buffer = ""
         // The previous reading stays on screen; a locker that has gone quiet
-        // for a minute is not a reason to blank the bar. curl exits 22 on an
-        // HTTP error: InPost answering 404 for a locker that used to report.
-        root.statusText = code === 22
-          ? "InPost is not publishing readings for " + root.lockerCode + " right now"
-          : "Sensor unreachable"
+        // for a minute is not a reason to blank the bar.
+        root.statusText = Model.fetchFailure(code, errors, root.lockerCode)
         return
       }
       var parsed = Model.parseAirResponse(airProc.buffer)

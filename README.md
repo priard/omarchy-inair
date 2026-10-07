@@ -13,6 +13,22 @@ parcel locker down the street.
 > publishes openly on its website. "InPost" and "Paczkomat" are trademarks of
 > InPost S.A. and appear here only to say where the data comes from.
 
+> [!WARNING]
+> **Readings are blocked by InPost (since 7 October 2026).** The endpoint that
+> serves the sensor readings (`inpost.pl/shipx-point-data/…`) now sits behind a
+> Cloudflare rule that refuses any request not made by the inpost.pl website
+> itself, with HTTP 403. inAir therefore gets no readings: the pill shows
+> `󰵃 —`, and the panel says that InPost is blocking automated access. Finding
+> lockers and sensors still works, because that part of InPost's API is open.
+>
+> There is nothing to fix on your side, and inAir will not try to get around
+> the block by pretending to be a browser. If InPost opens access again, the
+> readings come back on their own, without an update. InPost has published
+> nothing about the change; the same block broke the
+> [InPost Air Home Assistant integration](https://github.com/CyberDeer/InPost-Air/issues/130).
+> For this reason, removal of inAir from the Omarchy plugin marketplace has
+> been requested.
+
 ## Where the data comes from
 
 In October 2021 InPost started fitting air quality sensors to its Paczkomat®

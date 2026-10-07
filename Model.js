@@ -371,6 +371,37 @@ function airDataUrl(lockerId, code) {
     + "/" + encodeURIComponent(trimmed(code)) + "/air_index_level"
 }
 
+// -------------------------------------------------------- fetch failures
+
+// What went wrong with a request, in words, from the helper's exit status and
+// whatever curl said on stderr. curl exits 22 on any HTTP error and names the
+// status in its message ("The requested URL returned error: 403"), which is
+// the only place the 403 that means "blocked" can be told apart from the 404
+// that means "this locker went quiet".
+function httpStatusIn(text) {
+  var match = /returned error:\s*([1-5][0-9][0-9])/.exec(String(text || ""))
+  return match ? parseInt(match[1], 10) : 0
+}
+
+function fetchFailure(exitCode, stderrText, lockerCode) {
+  var code = plain(lockerCode, 32)
+  if (exitCode === 22) {
+    var http = httpStatusIn(stderrText)
+    if (http === 403)
+      return "InPost is blocking automated access to the sensor readings (HTTP 403)."
+        + " This cannot be fixed in the plugin; see the README."
+    if (http === 404) return "InPost is not publishing readings for " + code + " right now"
+    if (http === 429) return "InPost is limiting requests (HTTP 429); trying again later"
+    if (http >= 500) return "InPost's server is failing (HTTP " + http + "); trying again later"
+    if (http > 0) return "InPost answered HTTP " + http
+    return "InPost refused the request"
+  }
+  if (exitCode === 6) return "Cannot resolve inpost.pl — is the network up?"
+  if (exitCode === 7) return "Cannot connect to InPost"
+  if (exitCode === 28 || exitCode === 124 || exitCode === 137) return "InPost did not answer in time"
+  return "Sensor unreachable"
+}
+
 // ------------------------------------------------------------ formatting
 
 function formatDistance(metres) {
@@ -917,6 +948,8 @@ if (typeof module !== "undefined") {
     parseLockerId: parseLockerId,
     airDataUrl: airDataUrl,
     formatDistance: formatDistance,
+    httpStatusIn: httpStatusIn,
+    fetchFailure: fetchFailure,
     formatValue: formatValue,
     repeat: repeat,
     clip: clip,
