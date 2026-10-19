@@ -15,7 +15,8 @@ their input on stdin.
                            into the file; the other lockers are kept.
 
 On disk: {"version": 2, "lockers": {CODE: [[at, pm25, pm10, temperature,
-humidity, pressure], ...]}}, at most MAX_LOCKERS of them, the least recently
+humidity, pressure, rank], ...]}} (older rows without the rank
+still load), at most MAX_LOCKERS of them, the least recently
 read one dropped first. A version 1 file (one locker) is taken over as is.
 
 Both directions go through the same schema check, and what is stored is
@@ -44,7 +45,7 @@ MAX_INPUT = 65536           # one locker's samples as the shell sends them
 MAX_SAMPLES = 320
 MAX_LOCKERS = 4
 MAX_AGE_MS = 24 * 3600 * 1000
-FIELDS = ("pm25", "pm10", "temperature", "humidity", "pressure")
+FIELDS = ("pm25", "pm10", "temperature", "humidity", "pressure", "rank")
 # A history is kept per place a source reads from: a locker code from 0.8.x
 # ("KRA80M"), or since 0.9.0 a source-prefixed key ("sc:50.06,19.94",
 # "gios:400", "inpost:KRA80M"). Still a closed alphabet, still short.
@@ -161,6 +162,7 @@ RANGES = {
     "temperature": (-80, 80),
     "humidity": (0, 100),
     "pressure": (500, 1200),
+    "rank": (1, 6),
 }
 
 
@@ -179,9 +181,10 @@ def clean_samples(samples, now):
         if isinstance(item, dict):
             at = item.get("at")
             values = [item.get(field) for field in FIELDS]
-        elif isinstance(item, list) and len(item) == len(FIELDS) + 1:
+        elif isinstance(item, list) and len(FIELDS) <= len(item) <= len(FIELDS) + 1:
+            # Rows written before the rank existed are one value short.
             at = item[0]
-            values = item[1:]
+            values = item[1:] + [None] * (len(FIELDS) + 1 - len(item))
         else:
             continue
         if isinstance(at, bool) or not isinstance(at, int):

@@ -323,8 +323,7 @@ Item {
         width: parent.width
         elide: Text.ElideRight
         textFormat: Text.PlainText
-        text: (view.panel ? view.panel.sourceDetail : "")
-          + (view.panel && view.panel.previewId !== "" ? " · previewing, Esc to go back" : "")
+        text: view.panel ? view.panel.sourceDetail : ""
         color: view.dim
         font.family: view.fontFamily
         font.pixelSize: Style.font.bodySmall
@@ -457,13 +456,15 @@ Item {
       visible: trend.values.length >= 2
 
       readonly property int cells: 48
-      readonly property real norm: 25
       readonly property var trend: view.panel
-        ? Model.trendBuckets(view.panel.shownHistory, "pm25", cells, Date.now(),
-                             view.panel.historyWindow, ["pm10"])
-        : ({ values: [], extra: {}, span: 0, start: 0, end: 0 })
-      readonly property var levels: Model.trendLevels(trend, view.scale)
+        ? Model.trendFor(view.panel.shownHistory, cells, Date.now(), view.panel.historyWindow, view.scale)
+        : ({ values: [], levels: [], field: "pm25", span: 0, start: 0, end: 0 })
+      // Index-only sources (InPost) draw the level's rank, 1–6, with no norm.
+      readonly property bool byRank: trend.field === "rank"
+      readonly property real norm: byRank ? 0 : 25
+      readonly property var levels: trend.levels
       readonly property real peak: {
+        if (byRank) return 6.5
         var hi = norm
         for (var i = 0; i < trend.values.length; i++)
           if (trend.values[i] !== null && trend.values[i] > hi) hi = trend.values[i]
@@ -490,7 +491,7 @@ Item {
       Text {
         id: trendTitle
         textFormat: Text.PlainText
-        text: "PM2.5 TREND"
+        text: trendBox.byRank ? "INDEX TREND" : "PM2.5 TREND"
         color: view.dim
         font.family: view.fontFamily
         font.pixelSize: Style.font.caption
@@ -506,7 +507,9 @@ Item {
           var i = trendBox.hoverIndex
           if (i < 0 || i >= trendBox.trend.values.length || trendBox.trend.values[i] === null)
             return Model.spanLabel(trendBox.trend.span)
-          return Model.formatValue(trendBox.trend.values[i]) + " µg/m³ · "
+          return (trendBox.byRank
+              ? Model.levelInfo(trendBox.levels[i] || "", view.scale).label
+              : Model.formatValue(trendBox.trend.values[i]) + " µg/m³") + " · "
             + Model.clockTime(Model.trendCellTime(trendBox.trend, i))
         }
         color: trendBox.hoverIndex >= 0 ? view.foreground : view.faint
@@ -564,17 +567,19 @@ Item {
           ctx.fill()
 
           // The legal norm, dashed, so the curve has something to be judged
-          // against: above the line is over the limit.
-          ctx.globalAlpha = 0.55
-          ctx.strokeStyle = String(view.faint)
-          ctx.lineWidth = 1
-          ctx.setLineDash([3, 4])
-          ctx.beginPath()
-          var ny = Math.round(trendBox.yAt(trendBox.norm)) + 0.5
-          ctx.moveTo(0, ny)
-          ctx.lineTo(width, ny)
-          ctx.stroke()
-          ctx.setLineDash([])
+          // against: above the line is over the limit. An index has no norm.
+          if (!trendBox.byRank) {
+            ctx.globalAlpha = 0.55
+            ctx.strokeStyle = String(view.faint)
+            ctx.lineWidth = 1
+            ctx.setLineDash([3, 4])
+            ctx.beginPath()
+            var ny = Math.round(trendBox.yAt(trendBox.norm)) + 0.5
+            ctx.moveTo(0, ny)
+            ctx.lineTo(width, ny)
+            ctx.stroke()
+            ctx.setLineDash([])
+          }
 
           ctx.globalAlpha = 1
           ctx.strokeStyle = gradient
@@ -589,6 +594,7 @@ Item {
         Text {
           x: 0
           y: Math.round(trendBox.yAt(trendBox.norm)) - height - 1
+          visible: !trendBox.byRank
           textFormat: Text.PlainText
           text: "norm"
           color: view.faint
@@ -724,7 +730,7 @@ Item {
 
     PanelSeparator { width: parent.width; visible: view.panel !== null && view.panel.cards.length > 1 }
 
-    // ---- every enabled source; click or 1–4 to look at it
+    // ---- every source; click or 1–4 to switch to it
     Column {
       width: column.innerWidth
       x: column.inset
@@ -797,7 +803,7 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: if (view.panel) view.panel.previewSource(modelData.id)
+            onClicked: if (view.panel) view.panel.selectSource(modelData.id)
           }
         }
       }

@@ -19,6 +19,7 @@ var INPOST_ADVANCED = false
 var SOURCES = {
   sensorcommunity: {
     id: "sensorcommunity",
+    hint: "street sensors",
     label: "Sensor.Community",
     kind: "measurement",
     blurb: "Citizen low-cost sensors on the street, every 5 min",
@@ -29,6 +30,7 @@ var SOURCES = {
   },
   gios: {
     id: "gios",
+    hint: "official stations",
     label: "GIOŚ",
     kind: "measurement",
     blurb: "Official monitoring stations and the Polish index, hourly",
@@ -39,16 +41,18 @@ var SOURCES = {
   },
   openmeteo: {
     id: "openmeteo",
+    hint: "model and weather",
     label: "Open-Meteo",
     kind: "model",
-    blurb: "CAMS forecast model on an ~11 km grid, not a measurement",
-    hosts: ["air-quality-api.open-meteo.com"],
+    blurb: "CAMS forecast model on an ~11 km grid, not a measurement; weather from its forecast",
+    hosts: ["air-quality-api.open-meteo.com", "api.open-meteo.com"],
     attribution: "CAMS / Open-Meteo (CC BY 4.0)",
     minRefreshMinutes: 15,
     staleAfterMinutes: 120
   },
   inpost: {
     id: "inpost",
+    hint: "locker index",
     label: "InPost",
     kind: "index",
     blurb: "Index level of the nearest parcel-locker sensor; InPost blocks the readings",
@@ -60,7 +64,7 @@ var SOURCES = {
 }
 
 var ORDER = ["sensorcommunity", "gios", "openmeteo", "inpost"]
-var DEFAULT_SOURCES = ["sensorcommunity", "gios"]
+var DEFAULT_SOURCES = ["sensorcommunity"]
 
 function info(id) {
   return Object.prototype.hasOwnProperty.call(SOURCES, id) ? SOURCES[id] : null
@@ -242,16 +246,20 @@ function scAccept(state, raw, context, now) {
 
 // ------------------------------------------------------------- Open-Meteo
 
+// Two requests a refresh: the air, shown as soon as it arrives, then the
+// weather from the forecast API, merged into the same readings. The weather
+// failing leaves the air as it was.
 function omPlan(state, context) {
   if (!Model.validPlace(context.place)) return null
   return {
-    op: "om-current",
+    op: state.air ? "om-weather" : "om-current",
     input: Model.roundCoord(context.place.latitude) + " " + Model.roundCoord(context.place.longitude),
     state: state
   }
 }
 
-function omAccept(state, raw, context, now) {
+function omAccept(state, op, raw, context, now) {
+  if (op === "om-weather") return omWeather(state, raw)
   var data = parseJson(raw)
   if (!data || typeof data !== "object" || !data.current || typeof data.current !== "object")
     return unexpected("openmeteo", state)
@@ -262,7 +270,7 @@ function omAccept(state, raw, context, now) {
   if (!readings.pm25 && !readings.pm10) return result(state, null, "Open-Meteo has no data for this place", false)
   var lat = Model.finiteOr(data.latitude, null)
   var lon = Model.finiteOr(data.longitude, null)
-  return result(state, {
+  var observation = {
     source: "openmeteo",
     kind: "model",
     at: Model.parseLocalTime(data.current.time) || now,
@@ -273,7 +281,25 @@ function omAccept(state, raw, context, now) {
     level: "",
     readings: readings,
     members: []
-  }, "", false)
+  }
+  return result({ air: observation }, observation, "", true)
+}
+
+function omWeather(state, raw) {
+  var air = state.air
+  if (!air) return result({}, null, "", false)
+  var data = parseJson(raw)
+  var current = data && typeof data === "object" && data.current && typeof data.current === "object" ? data.current : {}
+  var weather = Model.buildReadings({
+    temperature: Model.finiteOr(current.temperature_2m, null),
+    humidity: Model.finiteOr(current.relative_humidity_2m, null),
+    pressure: Model.finiteOr(current.surface_pressure, null)
+  })
+  var readings = Object.create(null)
+  var field
+  for (field in air.readings) readings[field] = air.readings[field]
+  for (field in weather) readings[field] = weather[field]
+  return result({}, copy(air, { readings: readings }), "", false)
 }
 
 // --------------------------------------------------------------- dispatch
@@ -296,6 +322,7 @@ function reject(id, state, op, http, now) {
   // The index is a verdict on readings already in hand; without it they are
   // still worth showing, with the level computed from PM.
   if (id === "gios" && op === "gios-index") return giosAccept(state || {}, op, "{\"AqIndex\":{}}", {}, now)
+  if (id === "openmeteo" && op === "om-weather") return omWeather(state || {}, "{}")
   return null
 }
 
@@ -303,7 +330,7 @@ function accept(id, state, op, raw, context, now) {
   var s = state || {}
   var c = context || {}
   if (id === "sensorcommunity") return scAccept(s, raw, c, now)
-  if (id === "openmeteo") return omAccept(s, raw, c, now)
+  if (id === "openmeteo") return omAccept(s, op, raw, c, now)
   if (id === "gios") return giosAccept(s, op, raw, c, now)
   if (id === "inpost") return inpostAccept(s, op, raw, c, now)
   return result(s, null, "", false)
@@ -558,16 +585,6 @@ function isFresh(observation, now) {
   return !!meta && typeof observation.at === "number" && now - observation.at <= meta.staleAfterMinutes * 60000
 }
 
-// The pill reads the first enabled source with fresh data; a source that has
-// gone quiet hands over to the next one. When every source is stale, the
-// first one with anything at all still beats a dash.
-function primary(order, observations, now) {
-  var i
-  for (i = 0; i < order.length; i++) if (isFresh(observations[order[i]], now)) return order[i]
-  for (i = 0; i < order.length; i++) if (observations[order[i]]) return order[i]
-  return ""
-}
-
 var MINUTE = 60000
 
 function nextDelayMs(id, failures, http, refreshMinutes) {
@@ -597,15 +614,17 @@ function normalizeSources(list) {
   return out
 }
 
+// One source at a time, kept as a one-item `sources` list: 0.9.0 stored
+// several in priority order, and the first of them was the one on the pill.
 // Before 0.9.0 there was no `sources` key: anyone who had a locker pinned or
 // resolved used InPost, so they start the wizard with it still selected.
 function settingsFrom(entry) {
   var e = entry || {}
   var setupDone = e.setupDone === true
-  if (Array.isArray(e.sources)) return { sources: normalizeSources(e.sources), setupDone: setupDone }
+  if (Array.isArray(e.sources)) return { sources: normalizeSources(e.sources).slice(0, 1), setupDone: setupDone }
   var legacy = Model.plain(e.locker, 32) !== "" || Model.plain(e.resolvedCode, 32) !== ""
   return {
-    sources: legacy ? ["sensorcommunity", "gios", "inpost"] : DEFAULT_SOURCES.slice(),
+    sources: legacy ? ["inpost"] : DEFAULT_SOURCES.slice(),
     setupDone: setupDone
   }
 }

@@ -6,9 +6,9 @@ import "Model.js" as Model
 import "Sources.js" as Sources
 
 // The wizard on first run and the settings page after it: where to read the
-// air, and from which sources in which order. One list of rows with a cursor,
-// so the keyboard works the same as the mouse: arrows move, Enter or Space
-// acts, [ and ] reorder a source, / jumps to the search field.
+// air, and from which source. One list of rows with a cursor, so the keyboard
+// works the same as the mouse: arrows move, Enter or Space acts, / jumps to
+// the search field.
 //
 // Like the skins, this view owns no settings: every change goes through the
 // panel, which persists it.
@@ -31,14 +31,7 @@ Item {
     return Qt.rgba(foreground.r, foreground.g, foreground.b, alpha)
   }
 
-  // Enabled sources in priority order, then the rest.
-  readonly property var sourceOrder: {
-    if (!panel) return Sources.ORDER
-    var out = panel.sources.slice()
-    for (var i = 0; i < Sources.ORDER.length; i++)
-      if (out.indexOf(Sources.ORDER[i]) < 0) out.push(Sources.ORDER[i])
-    return out
-  }
+  readonly property var sourceOrder: Sources.ORDER
 
   readonly property var rows: {
     var out = [{ kind: "search" }]
@@ -72,18 +65,11 @@ Item {
     if (row.kind === "search") searchField.forceActiveFocus()
     else if (row.kind === "result") panel.setPlace(row.place)
     else if (row.kind === "weather") panel.useWeatherPlace()
-    else if (row.kind === "source") panel.toggleSource(row.id)
+    else if (row.kind === "source") panel.selectSource(row.id)
     else if (row.kind === "scale") panel.cycleScale()
     else if (row.kind === "skin") panel.cycleStyle()
     else if (row.kind === "refresh") panel.cycleRefresh()
     else if (row.kind === "done") wizard ? panel.finishSetup() : panel.closeSettings()
-  }
-
-  function reorder(delta) {
-    var row = rows[cursor]
-    if (!panel || !row || row.kind !== "source" || panel.sources.indexOf(row.id) < 0) return
-    panel.moveSource(row.id, delta)
-    cursor = Math.max(0, Math.min(rows.length - 1, cursor + delta))
   }
 
   function placeLine() {
@@ -116,9 +102,7 @@ Item {
     var meta = Sources.info(row.id)
     var sends = meta.hosts.length ? "sends your location (to ~100 m) to " + meta.hosts.join(", ")
       : "never sends your location"
-    var at = panel.sources.indexOf(row.id)
-    var rank = at === 0 ? "primary · " : (at > 0 ? "#" + (at + 1) + " · " : "")
-    return rank + meta.blurb + " · " + sends
+    return meta.blurb + " · " + sends
   }
 
   function rowOn(row) {
@@ -170,7 +154,7 @@ Item {
     TextField {
       id: searchField
       width: parent.width
-      placeholderText: "Town, district or postcode — or a locker code with InPost on"
+      placeholderText: "Town, district or postcode — or a locker code with InPost chosen"
       foreground: view.foreground
       font.family: view.fontFamily
       maximumLength: 64
@@ -228,7 +212,7 @@ Item {
 
         PanelSectionHeader {
           visible: rowItem.modelData.kind === "source" && rowItem.modelData.id === view.sourceOrder[0]
-          text: "SOURCES — Enter toggles, [ ] reorder; the first one on is the primary"
+          text: "SOURCE — one at a time; Enter chooses, 1–4 switch from the readings"
           foreground: view.dim
           fontFamily: view.fontFamily
         }
@@ -255,11 +239,14 @@ Item {
             width: parent.width - Style.space(16)
             spacing: Style.space(10)
 
-            // The terminal skin draws a check box; the plain one a switch.
+            // The terminal skin draws a check box (a radio mark for sources); the plain
+            // one a switch.
             Text {
               visible: view.terminal && (rowItem.modelData.kind === "source" || rowItem.modelData.kind === "weather")
               textFormat: Text.PlainText
-              text: view.rowOn(rowItem.modelData) ? "[x]" : "[ ]"
+              text: rowItem.modelData.kind === "source"
+                ? (view.rowOn(rowItem.modelData) ? "(•)" : "( )")
+                : (view.rowOn(rowItem.modelData) ? "[x]" : "[ ]")
               color: view.rowOn(rowItem.modelData) ? view.accent : view.dim
               font.family: view.fontFamily
               font.pixelSize: Style.font.body
@@ -296,7 +283,7 @@ Item {
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 text: rowItem.modelData.kind === "done" && !view.canFinish
-                  ? "Choose a place and at least one source first" : view.rowDetail(rowItem.modelData)
+                  ? "Choose a place and a source first" : view.rowDetail(rowItem.modelData)
                 color: view.faint
                 font.family: view.fontFamily
                 font.pixelSize: Style.font.caption

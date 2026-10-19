@@ -268,7 +268,7 @@ Item {
     // ---- which source, how far, how fresh
     GridRow {
       segments: [
-        { text: view.panel && view.panel.previewId !== "" ? "◇ " : "◆ ", color: view.levelColor },
+        { text: "◆ ", color: view.levelColor },
         { text: Model.padRight(view.panel ? view.panel.sourceTitle : "", view.inner - 2), color: view.foreground }
       ]
     }
@@ -327,11 +327,10 @@ Item {
     GridRow {
       readonly property int sparkCells: Math.max(4, view.inner - 20)
       readonly property var trend: view.panel
-        ? Model.trendBuckets(view.panel.shownHistory, "pm25", sparkCells, Date.now(),
-                             view.panel.historyWindow, ["pm10"])
-        : ({ values: [], extra: {}, span: 0 })
+        ? Model.trendFor(view.panel.shownHistory, sparkCells, Date.now(), view.panel.historyWindow, view.scale)
+        : ({ values: [], levels: [], span: 0 })
       readonly property string line: Model.sparkline(trend.values, sparkCells)
-      readonly property var levels: Model.trendLevels(trend, view.scale)
+      readonly property var levels: trend.levels
       readonly property var cells: {
         var out = []
         for (var i = 0; i < line.length; i++) {
@@ -354,7 +353,8 @@ Item {
 
     // ---- the locker doubles as a weather station
     GridLine {
-      line: Model.frameSection("STREET WEATHER", view.cols)
+      line: Model.frameSection(view.panel && view.panel.air && view.panel.air.kind === "model"
+        ? "WEATHER · FORECAST" : "STREET WEATHER", view.cols)
       visible: view.hasWeather
     }
 
@@ -403,7 +403,7 @@ Item {
 
     GridLine { line: Model.frameRow("", view.cols); visible: view.panel !== null && view.panel.air !== null }
 
-    // ---- every enabled source, one line each; click or 1–4 to look at it
+    // ---- every source, one line each; click or 1–4 to switch to it
     GridLine {
       line: Model.frameSection("SOURCES", view.cols)
       visible: view.panel !== null && view.panel.cards.length > 1
@@ -452,7 +452,7 @@ Item {
           anchors.fill: parent
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
-          onClicked: if (view.panel) view.panel.previewSource(modelData.id)
+          onClicked: if (view.panel) view.panel.selectSource(modelData.id)
         }
       }
     }
@@ -532,7 +532,7 @@ Item {
     Item {
       width: parent.width
       height: autoLine.height
-      visible: view.panel !== null && view.panel.pinnedCode !== ""
+      visible: view.panel !== null && view.panel.pinnedCode !== "" && view.panel.shownId === "inpost"
 
       Rectangle {
         x: view.cellWidth

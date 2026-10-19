@@ -82,3 +82,17 @@ test("keepOverride: an earlier write of ours landing late does not undo a later 
   assert.equal(Model.keepOverride(override, ["gios"], written), false, "someone else changed it")
   assert.equal(Model.keepOverride({ value: "plain", base: undefined }, undefined, [JSON.stringify("plain")]), true)
 })
+
+test("trendFor: PM2.5 when there is some, the index level when there is not", () => {
+  const t0 = Date.UTC(2026, 9, 19, 10, 0, 0)
+  const pm = [12, 30, 70].map((v, i) => ({ at: t0 + i * 600000, pm25: v, pm10: null, rank: 1 }))
+  const a = Model.trendFor(pm, 3, t0 + 1800000, 86400000, "polish")
+  assert.deepEqual([...a.values], [12, 30, 70])
+  assert.deepEqual([...a.levels], ["VERY_GOOD", "GOOD", "SUFFICIENT"])
+  const index = [6, 5, 2].map((r, i) => ({ at: t0 + i * 600000, pm25: null, rank: r }))
+  const b = Model.trendFor(index, 3, t0 + 1800000, 86400000, "polish")
+  assert.deepEqual([...b.values], [6, 5, 2])
+  assert.deepEqual([...b.levels], ["VERY_BAD", "BAD", "GOOD"])
+  assert.equal(b.span, 1200000)
+  assert.equal(Model.trendFor([], 3, t0, 86400000, "polish").values.length, 0)
+})

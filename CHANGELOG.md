@@ -11,15 +11,15 @@ All notable changes to this plugin. The format follows
 - **More sources than InPost.** Sensor.Community (citizen sensors, every
   5 minutes, the median of the nearest five sites), GIOŚ (official stations
   and the Polish index, hourly) and Open-Meteo (the CAMS model, labelled as a
-  model). None needs a key. Each runs on its own schedule with its own
-  backoff, and the pill shows the first one in your order that has fresh
-  data.
-- **A panel that compares them.** One line per enabled source; click it or
-  press 1–4 to look at that source, Esc to go back.
+  model, with temperature, humidity and pressure from its weather forecast).
+  None needs a key. One source at a time: press 1–4 in the panel, or click
+  one, to switch; the choice is saved, and only the chosen source is asked.
+- **A trend for InPost again.** InPost publishes only an index now, so its
+  trend draws the index level instead of PM2.5.
 - **Place search.** `/` takes a town or district (Open-Meteo's geocoder), a
   postcode (InPost's ShipX) or a locker code. inAir keeps its own place and
   falls back to the Weather widget's.
-- **First-run wizard and settings** (`o`): place, sources and their order,
+- **First-run wizard and settings** (`o`): place, source,
   index scale, skin and refresh interval. Each source says which host gets
   your location.
 - Tests: `node --test tests/` and `bash tests/fetch.test.sh`, offline, plus
@@ -37,8 +37,9 @@ All notable changes to this plugin. The format follows
   is skipped for the next nearest.
 - Histories are kept per source and place (`sc:50.06,19.94`, `gios:400`,
   `inpost:KRA80M`); 0.8 locker histories still read.
-- Upgrading from 0.8 opens the wizard once, with InPost and your pinned
-  locker kept.
+- Upgrading from 0.8 opens the wizard once, with InPost chosen and your
+  pinned locker kept. InPost's trend starts over: its history is now keyed
+  by locker code alone.
 
 ### Fixed
 

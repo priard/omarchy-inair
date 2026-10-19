@@ -32,6 +32,11 @@ for place in "50.060 19.940" "53.360 20.427"; do
   box=$(node -e "const {Sources}=require('./tests/load');console.log(Sources.plan('sensorcommunity',{radius:2},$ctx,Date.now()).input)")
   run sc-box "$box" > "$tmp" && accept sensorcommunity '{"radius":2}' sc-box "$ctx" || fails=$((fails + 1))
   run om-current "$place" > "$tmp" && accept openmeteo '{}' om-current "$ctx" || fails=$((fails + 1))
+  run om-weather "$place" > "$tmp" && node -e '
+    const {Sources,Model}=require("./tests/load")
+    const r=Sources.accept("openmeteo",{air:{source:"openmeteo",readings:{}}},"om-weather",require("fs").readFileSync(process.argv[1],"utf8"),{},Date.now())
+    const t=Model.value(r.observation.readings,"temperature"); if(t===null) process.exit(1)
+    console.log("ok   om-weather: " + t + " °C, " + Model.value(r.observation.readings,"humidity") + " %")' "$tmp" || fails=$((fails + 1))
   run nearby "$place" > "$tmp" && accept inpost '{}' nearby "$ctx" || fails=$((fails + 1))
   bin/inair-fetch gios-stations </dev/null > "$tmp" && accept gios '{}' gios-stations "$ctx" || fails=$((fails + 1))
 done

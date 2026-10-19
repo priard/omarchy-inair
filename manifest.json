@@ -15,7 +15,7 @@
   },
   "barWidget": {
     "displayName": "inAir",
-    "description": "PM2.5 pill coloured by the air quality index, from the source you rank first, with a panel comparing every enabled source.",
+    "description": "PM2.5 pill coloured by the air quality index, from the source you choose; switch between the four with 1–4 in the panel.",
     "category": "Info",
     "allowMultiple": false,
     "defaultSection": "center",

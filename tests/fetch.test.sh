@@ -26,6 +26,8 @@ expect_url gios-data "2752" "https://api.gios.gov.pl/pjp-api/v1/rest/data/getDat
 expect_url gios-index "400" "https://api.gios.gov.pl/pjp-api/v1/rest/aqindex/getIndex/400"
 expect_url om-current "50.060 19.940" \
   "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=50.060&longitude=19.940&current=pm10,pm2_5,european_aqi&timezone=auto"
+expect_url om-weather "50.060 19.940" \
+  "https://api.open-meteo.com/v1/forecast?latitude=50.060&longitude=19.940&current=temperature_2m,relative_humidity_2m,surface_pressure&timezone=auto"
 expect_url geocode "Nowy Sącz" \
   "https://geocoding-api.open-meteo.com/v1/search?name=Nowy%20S%C4%85cz&count=5&language=pl&format=json"
 expect_url geocode "Bielsko-Biała" \
@@ -42,6 +44,7 @@ expect_refusal gios-sensors "400/../../x"
 expect_refusal gios-data "12a"
 expect_refusal gios-index ""
 expect_refusal om-current "50.06"
+expect_refusal om-weather "50.06 x"
 expect_refusal geocode ""
 expect_refusal geocode "$(printf 'x%.0s' {1..130})"
 expect_refusal nope "x"

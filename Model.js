@@ -958,6 +958,29 @@ function trendLevels(trend, scale) {
   return out
 }
 
+// The trend the panel draws: PM2.5 with each cell judged on its own PM, or,
+// for a source that publishes only an index (InPost), the index level itself,
+// stored with each sample as its rank on `scale`.
+function trendFor(samples, cells, now, windowMs, scale) {
+  var trend = trendBuckets(samples, "pm25", cells, now, windowMs, ["pm10"])
+  if (trend.values.length >= 2) {
+    trend.field = "pm25"
+    trend.levels = trendLevels(trend, scale)
+    return trend
+  }
+  trend = trendBuckets(samples, "rank", cells, now, windowMs)
+  trend.field = "rank"
+  var table = String(scale || "polish") === "european" ? EU_LEVELS : LEVELS
+  trend.levels = []
+  for (var i = 0; i < trend.values.length; i++) {
+    var rank = Math.round(trend.values[i])
+    var found = ""
+    for (var key in table) if (table[key].rank === rank) found = key
+    trend.levels.push(found)
+  }
+  return trend
+}
+
 // The middle of trend cell `index`, as a time: what the plain skin's hover
 // read-out names.
 function trendCellTime(trend, index) {
@@ -1101,6 +1124,7 @@ if (typeof module !== "undefined") {
     trendArrow: trendArrow,
     trendBuckets: trendBuckets,
     trendLevels: trendLevels,
+    trendFor: trendFor,
     trendCellTime: trendCellTime,
     clockTime: clockTime,
     spanLabel: spanLabel,

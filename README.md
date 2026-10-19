@@ -17,21 +17,21 @@ the index of the InPost parcel locker down the road, side by side.
 
 ## Where the data comes from
 
-inAir reads from up to four sources. You choose which, and in what order, the
-first time you open it; the first one that has fresh data drives the bar, and
-the panel shows all of them.
+inAir reads from one of four sources at a time. You choose it the first time
+you open it, and switch with `1`–`4` in the panel whenever you like; the choice
+is saved. Only the chosen source is asked, so only its host ever sees your
+location.
 
 | Source | What it is | Updates | Gives | Gets from you |
 |---|---|---|---|---|
 | **Sensor.Community** | citizen low-cost sensors on balconies and lamp posts | every 5 min | PM1*, PM2.5, PM10, temperature, humidity, pressure: the median of the nearest five sites | your coordinates, rounded to ~100 m |
 | **GIOŚ** | Poland's official monitoring stations | hourly, 1–2 h behind | PM2.5, PM10 and the official Polish index from the nearest station within 30 km | nothing: inAir downloads the whole station list and picks the nearest one itself |
-| **Open-Meteo** | the CAMS air quality **model**, on an ~11 km grid | every 15 min | PM2.5 and PM10 as modelled, not measured | your coordinates, rounded to ~100 m |
+| **Open-Meteo** | the CAMS air quality **model**, on an ~11 km grid | every 15 min | PM2.5 and PM10 as modelled, not measured, plus temperature, humidity and pressure from its weather forecast | your coordinates, rounded to ~100 m |
 | **InPost** | the sensor on the nearest parcel locker | every few minutes | the locker's index level only (see below) | your coordinates, rounded to ~100 m |
 
 \* PM1 comes only from sensors that measure it (SPS30).
 
-None of them needs an account or a key. Sensor.Community and GIOŚ are on by
-default. Sensor.Community is closest to the street but uses cheap sensors that
+None of them needs an account or a key. Sensor.Community is the default. Sensor.Community is closest to the street but uses cheap sensors that
 read high in fog; GIOŚ is the reference but far between and an hour or two
 behind; Open-Meteo works anywhere but is a model, and inAir says so wherever it
 shows it.
@@ -70,11 +70,10 @@ things:
    district (looked up by Open-Meteo's geocoder) or a Polish postcode (looked
    up by InPost's locker search), press Enter and pick the result. inAir keeps
    its own place; what you type is not stored.
-2. **Which sources, in which order.** Enter or Space switches a source on or
-   off, `[` and `]` move it up or down. The first one that is on is the
-   primary. Each source says which host gets your location.
+2. **Which source.** Enter or Space chooses one. Each source says which host
+   gets your location.
 
-Choose **Done**, and the pill shows the primary source's PM2.5 within a few
+Choose **Done**, and the pill shows the source's PM2.5 within a few
 seconds. Everything stays changeable later with `o`.
 
 Upgrading from 0.8: the wizard opens once, with InPost already on and your
@@ -142,23 +141,21 @@ Inside the panel, the header buttons and their keys:
 
 | Button | Key | Does |
 |---|---|---|
-| 󰍉 | `/` | Opens the settings page with the search field focused: a **town or district**, a **postcode** (`31-042`), or, with InPost on, a **locker code** (`KRA80M`) to pin that locker. |
+| 󰍉 | `/` | Opens the settings page with the search field focused: a **town or district**, a **postcode** (`31-042`), or, with InPost chosen, a **locker code** (`KRA80M`) to pin that locker. |
 | `PL` / `EU` | `i` | Shows which index is in use; click to switch. InPost's level is always on the Polish scale. |
 | 󰒓 | `o` | Places and sources: the same page as the first-run wizard, plus the index scale, the skin and the refresh interval. |
 | 󰕮 / 󰆍 | `s` | Switches between the terminal and the plain skin. |
 | 󰑐 | `r` | Asks every source again, now. Spins while it works. |
-| | `1`–`4` | Looks at that source in the big view without changing your order; `Esc` goes back. |
+| | `1`–`4` | Switches to that source (1 Sensor.Community, 2 GIOŚ, 3 Open-Meteo, 4 InPost) and saves the choice. |
 
 Hover a button for a tooltip. A switch takes effect immediately and is saved
 to `shell.json`, so it survives a restart.
 
-- **Sources.** Under the readings, one line per source you have on: its
-  level, PM2.5 and PM10, and how old its data is. Click one to look at it.
-  A source that has nothing for your place says why ("No Sensor.Community
-  sensor within 10 km", "No GIOŚ station with live PM data within 30 km").
-- **The primary source** is the first one in your order with fresh data. If
-  it goes quiet (Sensor.Community after 30 minutes, GIOŚ after three hours,
-  the others after two), the bar falls through to the next one.
+- **Sources.** Under the readings, one line per source, the chosen one with
+  its level, PM2.5 and PM10 and how old its data is. Click one, or press its
+  number, to switch to it. A source that has nothing for your place says why
+  ("No Sensor.Community sensor within 10 km", "No GIOŚ station with live PM
+  data within 30 km"), and the list shows what else to try.
 - **In the median.** For Sensor.Community, the sites the number came from and
   how far away they are.
 - With InPost shown, its **lockers in range** are listed; click one to pin it,
@@ -192,7 +189,9 @@ meters.
 │                                          │
 ├─ SOURCES ────────────────────────────────┤
 │ › ● 1 Sensor.Community PM2.5 10 2 min ago│
-│   ● 2 GIOŚ             PM2.5 14   44 min │
+│   ● 2 GIOŚ             official stations │
+│   ● 3 Open-Meteo       model and weather │
+│   ● 4 InPost           locker index      │
 │ / find · o setup · 1-4 source · i s r    │
 └──────────────────────────────────────────┘
 ```
@@ -214,9 +213,10 @@ version shows, and PM2.5 is drawn large in square pixel digits.
   cleared. Only those two values are stored, so a cell can now and then differ
   from the level the source showed at the time. The readings are kept in a
   small private file (see below), so a shell restart or a plugin update does
-  not wipe the trend. The trend follows the primary source and is kept per
-  source and place, so it never mixes two streets or two sources.
-- **Street weather** (Sensor.Community), in the same block cells as the meters. Temperature is a
+  not wipe the trend. The trend is kept per source and place, so it never
+  mixes two streets or two sources. InPost publishes no numbers, so its trend
+  is the index level itself.
+- **Weather** (Sensor.Community's sensors, or Open-Meteo's forecast), in the same block cells as the meters. Temperature is a
   heat strip on a −20…40 °C scale, each cell coloured by the temperature it
   stands for, from cold blue to hot red. Humidity fills 0–100%. Pressure is a
   single block on a dotted 970–1050 hPa ruler. Each row has an arrow showing
@@ -255,7 +255,7 @@ omarchy bar set priard.inair locker KRA80M   # pin an InPost locker
 
 | Key | Default | Meaning |
 |---|---|---|
-| `sources` | `["sensorcommunity", "gios"]` | Sources in priority order: `sensorcommunity`, `gios`, `openmeteo`, `inpost`. |
+| `sources` | `["sensorcommunity"]` | The chosen source, as a one-item list: `sensorcommunity`, `gios`, `openmeteo` or `inpost`. A longer list (0.9 betas) keeps its first item. |
 | `place` | none | Where to read: `{ name, latitude, longitude }`. Without it, the Weather widget's location. |
 | `setupDone` | `false` | Whether the first-run wizard has been through. |
 | `locker` | `""` | InPost locker to pin, e.g. `"KRA80M"`. Empty follows the nearest one with a sensor. |
@@ -275,12 +275,13 @@ Public endpoints only. No account, no API key, no credential of any kind:
 | `GET api.gios.gov.pl/pjp-api/v1/rest/station/findAll` | once a session and on a new place | all GIOŚ stations, to pick the nearest here | nothing |
 | `GET api.gios.gov.pl/pjp-api/v1/rest/station/sensors/<id>`, `data/getData/<id>`, `aqindex/getIndex/<id>` | every 20 min or more | that station's sensors, readings and index | the station's id |
 | `GET air-quality-api.open-meteo.com/v1/air-quality?…` | every 15 min or more | modelled PM for your place | your place, rounded to ~100 m |
+| `GET api.open-meteo.com/v1/forecast?…` | right after each of the above | temperature, humidity, pressure | your place, rounded to ~100 m |
 | `GET api-shipx-pl.easypack24.net/v1/points?relative_point=…` | when InPost is on and finds its locker | the nearest locker with a sensor | your place, rounded to ~100 m |
 | `GET api-shipx-pl.easypack24.net/v1/points/<code>` | every `refreshMinutes` with InPost on | that locker's index level | the locker's code |
 | `GET api-shipx-pl.easypack24.net/v1/points?relative_post_code=…` | when you search a postcode | a point near that postcode, to stand for it | the postcode |
 | `GET geocoding-api.open-meteo.com/v1/search?name=…` | when you search a place name | matching places | what you typed |
 
-Only the sources you switch on are asked anything. Nothing else leaves the
+Only the source you choose is asked anything. Nothing else leaves the
 machine, and inAir never looks up your location from your IP address.
 Requests identify themselves with the user agent `omarchy-inair`.
 

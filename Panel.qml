@@ -113,7 +113,7 @@ Panel {
   readonly property int refreshMinutes:
     Math.max(1, Math.min(60, Math.round(Model.finiteOr(entryValue("refreshMinutes", 5), 5))))
 
-  // Which sources, in which order, and whether the wizard has been through.
+  // Which source (one at a time) and whether the wizard has been through.
   readonly property var sourceSettings: Sources.settingsFrom({
     sources: entryValue("sources", null),
     setupDone: entryValue("setupDone", false),
@@ -142,7 +142,6 @@ Panel {
   property var observations: ({})
   property var states: ({})
   property var statuses: ({})
-  property string previewId: ""
   property bool settingsOpen: false
   property bool searching: false
   property var placeResults: []
@@ -161,8 +160,8 @@ Panel {
 
   readonly property bool showingSetup: setupNeeded || settingsOpen
 
-  readonly property string primaryId: Sources.primary(sources, observations, clock)
-  readonly property string shownId: previewId !== "" && sources.indexOf(previewId) >= 0 ? previewId : primaryId
+  readonly property string primaryId: sources.length ? sources[0] : ""
+  readonly property string shownId: primaryId
   readonly property var air: shownId !== "" ? (observations[shownId] || null) : null
   readonly property var primaryObservation: primaryId !== "" ? (observations[primaryId] || null) : null
   readonly property bool indexOnly: air !== null && air.kind === "index" && Model.value(air.readings, "pm25") === null
@@ -186,7 +185,6 @@ Panel {
   readonly property string levelKey: Model.effectiveLevel(air, levelScale)
   readonly property var levelMeta: Model.levelInfo(levelKey, levelScale)
 
-  // The pill follows the primary source even while the panel previews another.
   readonly property color levelColor: Model.levelInfo(
     Model.effectiveLevel(primaryObservation, scaleFor(primaryObservation)), scaleFor(primaryObservation)).color
 
@@ -228,12 +226,14 @@ Panel {
     return Model.plain(d.title + " · " + d.detail + "\n" + line, 160)
   }
 
-  // One row per enabled source, in priority order, for the panel's cards.
+  // One row per source, the chosen one with its reading; 1–4 or a click
+  // switches. Only the chosen source runs, so the others have nothing to show.
   readonly property var cards: {
     var out = []
-    for (var i = 0; i < sources.length; i++) {
-      var id = sources[i]
-      var o = observations[id] || null
+    for (var i = 0; i < Sources.ORDER.length; i++) {
+      var id = Sources.ORDER[i]
+      var chosen = id === primaryId
+      var o = chosen ? (observations[id] || null) : null
       var s = scaleFor(o)
       out.push({
         id: id,
@@ -246,9 +246,8 @@ Panel {
         distance: o ? o.distance : null,
         at: o ? o.at : 0,
         fresh: Sources.isFresh(o, clock),
-        status: statuses[id] || "",
-        shown: id === shownId,
-        primary: id === primaryId
+        status: chosen ? (statuses[id] || "") : Sources.info(id).hint,
+        shown: chosen
       })
     }
     return out
@@ -312,6 +311,9 @@ Panel {
     if (historyKey === "") return
     var r = observation.readings
     var at = observation.at
+    var s = scaleFor(observation)
+    // The level too, as its rank: all an index-only source has to draw a trend.
+    var rank = Model.levelInfo(Model.effectiveLevel(observation, s), s).rank
     // Opening the panel also refreshes, so readings can arrive seconds apart;
     // a sample younger than a minute is replaced rather than added, which keeps
     // the sparkline a picture of time and not of how often the panel opened.
@@ -323,7 +325,8 @@ Panel {
       pm10: Model.value(r, "pm10"),
       temperature: Model.value(r, "temperature"),
       humidity: Model.value(r, "humidity"),
-      pressure: Model.value(r, "pressure")
+      pressure: Model.value(r, "pressure"),
+      rank: rank > 0 ? rank : null
     })
     history = next.slice(-historyLimit)
     saveHistory()
@@ -421,7 +424,6 @@ Panel {
   function close() {
     setCenterHoverRevealSuppressed(false)
     root.closeSettings()
-    root.previewId = ""
     root.controller.hide()
   }
 
@@ -520,12 +522,8 @@ Panel {
     }
   }
 
-  function previewSource(id) {
-    previewId = previewId === id || id === primaryId ? "" : id
-  }
-
-  function previewIndex(n) {
-    if (n >= 1 && n <= sources.length) previewSource(sources[n - 1])
+  function selectIndex(n) {
+    if (n >= 1 && n <= Sources.ORDER.length) selectSource(Sources.ORDER[n - 1])
   }
 
   // ------------------------------------------------------------ settings
@@ -538,7 +536,6 @@ Panel {
   property bool focusSearchPending: false
 
   function openSettings(focusSearch) {
-    previewId = ""
     focusSearchPending = !!focusSearch
     settingsOpen = true
     if (focusSearch) Qt.callLater(function() { root.searchFocusRequested() })
@@ -551,26 +548,8 @@ Panel {
     settingsOpen = false
   }
 
-  function persistSources(list) {
-    persist({ sources: Sources.normalizeSources(list) })
-  }
-
-  function toggleSource(id) {
-    var list = sources.slice()
-    var at = list.indexOf(id)
-    if (at >= 0) list.splice(at, 1)
-    else list.push(id)
-    persistSources(list)
-  }
-
-  function moveSource(id, delta) {
-    var list = sources.slice()
-    var at = list.indexOf(id)
-    var to = at + delta
-    if (at < 0 || to < 0 || to >= list.length) return
-    list.splice(at, 1)
-    list.splice(to, 0, id)
-    persistSources(list)
+  function selectSource(id) {
+    if (Sources.info(id) && id !== primaryId) persist({ sources: [id] })
   }
 
   function setPlace(place) {
@@ -630,7 +609,7 @@ Panel {
     }
     if (Sources.looksLikeLockerCode(typed)) {
       if (sources.indexOf("inpost") < 0) {
-        placeStatus = "That looks like a locker code; switch InPost on to pin a locker."
+        placeStatus = "That looks like a locker code; choose InPost to pin a locker."
         return
       }
       pinLocker(typed.toUpperCase())
@@ -937,8 +916,7 @@ Panel {
       blocked: root.searching
 
       onCloseRequested: {
-        if (root.previewId !== "") root.previewId = ""
-        else if (root.settingsOpen && !root.setupNeeded) root.closeSettings()
+        if (root.settingsOpen && !root.setupNeeded) root.closeSettings()
         else root.close()
       }
       onTabRequested: function(direction) { root.switchPanel(direction) }
@@ -948,18 +926,16 @@ Panel {
       onActivateRequested: {
         if (root.showingSetup && bodyLoader.item && bodyLoader.item.activate) bodyLoader.item.activate()
       }
-      // / search, o settings, 1–4 preview a source, i scale, s skin,
-      // r refresh; on the settings page [ and ] move a source up or down.
+      // / search, o settings, 1–4 choose the source, i scale, s skin,
+      // r refresh.
       onTextKey: function(text) {
         if (root.showingSetup) {
           if (text === "/") root.searchFocusRequested()
-          else if ((text === "[" || text === "]") && bodyLoader.item && bodyLoader.item.reorder)
-            bodyLoader.item.reorder(text === "[" ? -1 : 1)
           return
         }
         if (text === "/") root.openSettings(true)
         else if (text === "o") root.openSettings(false)
-        else if (text >= "1" && text <= "4") root.previewIndex(Number(text))
+        else if (text >= "1" && text <= "4") root.selectIndex(Number(text))
         else if (text === "i") root.cycleScale()
         else if (text === "s") root.cycleStyle()
         else if (text === "r" && !root.busy) root.refreshEverything()

@@ -29,6 +29,8 @@
 #   gios-*  GET  api.gios.gov.pl/pjp-api/v1/rest/… (station list, sensors,
 #                data, index) — never given a coordinate
 #   om-current GET air-quality-api.open-meteo.com/v1/air-quality?…
+#   om-weather GET api.open-meteo.com/v1/forecast?… (temperature, humidity,
+#                pressure for the Open-Meteo source)
 #   geocode GET  geocoding-api.open-meteo.com/v1/search?name=…
 
 set -uo pipefail
@@ -222,6 +224,14 @@ cmd_om_current() {
     "$MAX_SMALL"
 }
 
+cmd_om_weather() {
+  local lat="${1:-}" lon="${2:-}"
+  valid_coord "$lat" || die "invalid latitude"
+  valid_coord "$lon" || die "invalid longitude"
+  fetch "https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,surface_pressure&timezone=auto" \
+    "$MAX_SMALL"
+}
+
 # Every byte that is not an ASCII letter or digit leaves as %XX, so whatever
 # was typed — Polish letters, a hyphen, a quote — reaches the URL as the same
 # closed alphabet the fetch check enforces. The bytes come from od, not from
@@ -274,6 +284,7 @@ case "$COMMAND" in
   gios-data) cmd_gios_data "$@" ;;
   gios-index) cmd_gios_index "$@" ;;
   om-current) cmd_om_current "$@" ;;
+  om-weather) cmd_om_weather "$@" ;;
   geocode) cmd_geocode "$@" ;;
-  *)      die "usage: inair-fetch nearby|postcode|point|id|air|sc-box|gios-stations|gios-sensors|gios-data|gios-index|om-current|geocode, arguments on stdin" ;;
+  *)      die "usage: inair-fetch nearby|postcode|point|id|air|sc-box|gios-stations|gios-sensors|gios-data|gios-index|om-current|om-weather|geocode, arguments on stdin" ;;
 esac

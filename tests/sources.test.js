@@ -107,6 +107,27 @@ test("Open-Meteo: current PM from the model", () => {
   assert.equal(Sources.accept("openmeteo", {}, "om-current", "{\"current\":{}}", KRAKOW, NOW).observation, null)
 })
 
+test("Open-Meteo: the weather follows the air and joins its readings", () => {
+  const air = Sources.accept("openmeteo", {}, "om-current", fixture("om-current.json"), KRAKOW, NOW)
+  assert.equal(air.again, true, "the air is shown at once, the weather asked next")
+  const step = Sources.plan("openmeteo", air.state, KRAKOW, NOW)
+  assert.deepEqual({ op: step.op, input: step.input }, { op: "om-weather", input: "50.060 19.940" })
+  const r = Sources.accept("openmeteo", step.state, "om-weather", fixture("om-weather.json"), KRAKOW, NOW)
+  assert.equal(r.again, false)
+  assert.equal(r.observation.readings.pm25.value, 7.1)
+  assert.equal(r.observation.readings.temperature.value, 8.7)
+  assert.equal(r.observation.readings.humidity.value, 92)
+  assert.equal(r.observation.readings.pressure.value, 1001.2)
+  assert.equal(Sources.plan("openmeteo", r.state, KRAKOW, NOW).op, "om-current", "next refresh starts with the air")
+  // No weather is still a reading of the air.
+  const failed = Sources.reject("openmeteo", step.state, "om-weather", 502, NOW)
+  assert.equal(failed.observation.readings.pm25.value, 7.1)
+  assert.equal(failed.observation.readings.temperature, undefined)
+  assert.equal(Sources.plan("openmeteo", failed.state, KRAKOW, NOW).op, "om-current")
+  const junk = Sources.accept("openmeteo", step.state, "om-weather", "{}", KRAKOW, NOW)
+  assert.equal(junk.observation.readings.pm25.value, 7.1)
+})
+
 function walkGios(answers) {
   // Runs the GIOŚ machine against canned answers keyed by op, the way the
   // runner would, until it stops asking for an immediate next step.
@@ -212,12 +233,10 @@ test("InPost: a pinned locker is looked up by code and never via the readings en
   assert.equal(none.status, "KRA80M has no air sensor")
 })
 
-test("primary: first fresh source in priority order, stale ones fall through", () => {
-  const fresh = { source: "gios", at: NOW - 60 * 60000 }
-  const stale = { source: "sensorcommunity", at: NOW - 45 * 60000 }
-  assert.equal(Sources.primary(["sensorcommunity", "gios"], { sensorcommunity: stale, gios: fresh }, NOW), "gios")
-  assert.equal(Sources.primary(["sensorcommunity", "gios"], { sensorcommunity: stale }, NOW), "sensorcommunity")
-  assert.equal(Sources.primary(["sensorcommunity"], {}, NOW), "")
+test("isFresh: within the source's own staleness window", () => {
+  assert.equal(Sources.isFresh({ source: "gios", at: NOW - 60 * 60000 }, NOW), true)
+  assert.equal(Sources.isFresh({ source: "sensorcommunity", at: NOW - 45 * 60000 }, NOW), false)
+  assert.equal(Sources.isFresh(null, NOW), false)
 })
 
 test("nextDelayMs: refresh floor, doubling backoff, 429 floor, 1 h cap", () => {
@@ -229,15 +248,15 @@ test("nextDelayMs: refresh floor, doubling backoff, 429 floor, 1 h cap", () => {
   assert.equal(Sources.nextDelayMs("gios", 5, 0, 5), 60 * 60000)
 })
 
-test("settingsFrom: defaults, explicit lists and the 0.8.x upgrade", () => {
+test("settingsFrom: one source, the 0.9 lists and the 0.8.x upgrade", () => {
   // Arrays made inside the vm context have another realm's prototype, which
   // deepStrictEqual would count as a difference; compare their JSON instead.
   const json = (x) => JSON.parse(JSON.stringify(x))
-  assert.deepEqual(json(Sources.settingsFrom({})), { sources: ["sensorcommunity", "gios"], setupDone: false })
-  assert.deepEqual([...Sources.settingsFrom({ sources: ["gios", "bogus", "gios", "openmeteo"] }).sources], ["gios", "openmeteo"])
+  assert.deepEqual(json(Sources.settingsFrom({})), { sources: ["sensorcommunity"], setupDone: false })
+  assert.deepEqual([...Sources.settingsFrom({ sources: ["bogus", "gios", "openmeteo"] }).sources], ["gios"])
   assert.deepEqual([...Sources.settingsFrom({ sources: [] }).sources], [])
   const upgraded = Sources.settingsFrom({ locker: "KRA80M", resolvedCode: "KRA80M", resolvedId: "123" })
-  assert.deepEqual([...upgraded.sources], ["sensorcommunity", "gios", "inpost"])
+  assert.deepEqual([...upgraded.sources], ["inpost"])
   assert.equal(upgraded.setupDone, false)
   assert.equal(Sources.settingsFrom({ sources: ["gios"], setupDone: true }).setupDone, true)
 })
