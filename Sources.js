@@ -293,8 +293,145 @@ function accept(id, state, op, raw, context, now) {
   return result(s, null, "", false)
 }
 
-// Filled in by the next tasks; until then these sources plan nothing.
-function giosPlan(state, context) { return null }
-function giosAccept(state, op, raw, context, now) { return result(state, null, "", false) }
+// ------------------------------------------------------------------- GIOŚ
+
+// GIOŚ's API answers in Polish JSON-LD; these are its keys.
+var GIOS_KEYS = {
+  stations: "Lista stacji pomiarowych",
+  sensors: "Lista stanowisk pomiarowych dla podanej stacji",
+  data: "Lista danych pomiarowych"
+}
+var GIOS_RANGE_M = 30000
+var GIOS_TRIES = 5
+
+function giosStations(data, place) {
+  var list = data && Array.isArray(data[GIOS_KEYS.stations]) ? data[GIOS_KEYS.stations] : null
+  if (!list) return null
+  var out = []
+  for (var i = 0; i < Math.min(list.length, 2000); i++) {
+    var s = list[i]
+    if (!s || typeof s !== "object") continue
+    var id = Model.finiteOr(s["Identyfikator stacji"], null)
+    var lat = Model.finiteOr(s["WGS84 φ N"], null)
+    var lon = Model.finiteOr(s["WGS84 λ E"], null)
+    if (id === null || id % 1 !== 0 || id < 0 || lat === null || lon === null) continue
+    var distance = Model.distanceMetres(place.latitude, place.longitude, lat, lon)
+    if (distance > GIOS_RANGE_M) continue
+    out.push({ id: id, name: Model.plain(s["Nazwa stacji"], 64), lat: lat, lon: lon, distance: distance })
+  }
+  out.sort(function(a, b) { return a.distance - b.distance })
+  return out.slice(0, GIOS_TRIES)
+}
+
+function giosCycle(state) {
+  var cycle = []
+  if (state.sensors.pm25 !== undefined) cycle.push("pm25")
+  if (state.sensors.pm10 !== undefined) cycle.push("pm10")
+  cycle.push("index")
+  return cycle
+}
+
+function giosPlan(state, context) {
+  if (!Model.validPlace(context.place)) return null
+  if (!state.stations) return { op: "gios-stations", input: "", state: state }
+  if (!state.station) return null
+  if (!state.sensors) return { op: "gios-sensors", input: String(state.station.id), state: state }
+  var fresh = !state.cycle || state.cycle.length === 0
+  var next = fresh ? copy(state, { cycle: giosCycle(state), values: {}, level: "" }) : state
+  var head = next.cycle[0]
+  if (head === "index") return { op: "gios-index", input: String(next.station.id), state: next }
+  return { op: "gios-data", input: String(next.sensors[head]), state: next }
+}
+
+// The series comes newest first, and the newest hour is often still null.
+function giosLatest(data) {
+  var list = data && Array.isArray(data[GIOS_KEYS.data]) ? data[GIOS_KEYS.data] : []
+  var best = null
+  for (var i = 0; i < Math.min(list.length, 500); i++) {
+    var row = list[i]
+    if (!row || typeof row !== "object") continue
+    var value = Model.finiteOr(row["Wartość"], null)
+    var at = Model.parseLocalTime(row["Data"])
+    if (value === null || at === null) continue
+    if (!best || at > best.at) best = { value: value, at: at }
+  }
+  return best
+}
+
+function giosObservation(state) {
+  var values = {}
+  var newest = 0
+  for (var field in state.values) {
+    values[field] = state.values[field].value
+    newest = Math.max(newest, state.values[field].at)
+  }
+  var readings = Model.buildReadings(values)
+  if (!readings.pm25 && !readings.pm10) return null
+  return {
+    source: "gios",
+    kind: "measurement",
+    at: newest,
+    place: state.station.name,
+    distance: state.station.distance,
+    count: null,
+    level: state.level || "",
+    readings: readings,
+    members: []
+  }
+}
+
+function giosAccept(state, op, raw, context, now) {
+  var data = parseJson(raw)
+  if (!data || typeof data !== "object") return unexpected("gios", state)
+
+  if (op === "gios-stations") {
+    var stations = giosStations(data, context.place)
+    if (stations === null) return unexpected("gios", state)
+    var next = { stations: stations, station: stations[0] || null }
+    if (!next.station) return result(next, null, "No GIOŚ station within 30 km", false)
+    return result(next, null, "", true)
+  }
+
+  if (op === "gios-sensors") {
+    var list = Array.isArray(data[GIOS_KEYS.sensors]) ? data[GIOS_KEYS.sensors] : []
+    var sensors = {}
+    for (var i = 0; i < Math.min(list.length, 64); i++) {
+      var code = list[i] ? String(list[i]["Wskaźnik - kod"]) : ""
+      var id = list[i] ? Model.finiteOr(list[i]["Identyfikator stanowiska"], null) : null
+      if (id === null || id % 1 !== 0 || id < 0) continue
+      if (code === "PM2.5") sensors.pm25 = id
+      else if (code === "PM10") sensors.pm10 = id
+    }
+    if (sensors.pm25 !== undefined || sensors.pm10 !== undefined)
+      return result(copy(state, { sensors: sensors }), null, "", true)
+    // No PM at this station: try the next nearest.
+    var rest = state.stations.filter(function(s) { return s.id !== state.station.id })
+    var after = { stations: rest, station: rest[0] || null }
+    if (!after.station) return result(after, null, "No GIOŚ station with PM measurements within 30 km", false)
+    return result(after, null, "", true)
+  }
+
+  var cycle = (state.cycle || []).slice(1)
+  var updated = copy(state, { cycle: cycle })
+  if (op === "gios-data") {
+    var latest = giosLatest(data)
+    if (latest) {
+      var values = copy(state.values)
+      values[state.cycle[0]] = latest
+      updated.values = values
+    }
+  } else if (op === "gios-index") {
+    var index = data.AqIndex && typeof data.AqIndex === "object" ? data.AqIndex : {}
+    updated.level = Model.giosLevel(Model.finiteOr(index["Wartość indeksu"], null))
+  }
+  if (cycle.length > 0) return result(updated, null, "", true)
+
+  var observation = giosObservation(updated)
+  if (!observation)
+    return result(updated, null, "GIOŚ: " + updated.station.name + " published no PM readings in the last hours", false)
+  return result(updated, observation, "", false)
+}
+
+// Filled in by the next task; until then InPost plans nothing.
 function inpostPlan(state, context) { return null }
 function inpostAccept(state, op, raw, context, now) { return result(state, null, "", false) }

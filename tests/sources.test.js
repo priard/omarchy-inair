@@ -105,3 +105,79 @@ test("Open-Meteo: current PM from the model", () => {
   assert.equal(r.observation.level, "")
   assert.equal(Sources.accept("openmeteo", {}, "om-current", "{\"current\":{}}", KRAKOW, NOW).observation, null)
 })
+
+function walkGios(answers) {
+  // Runs the GIOŚ machine against canned answers keyed by op, the way the
+  // runner would, until it stops asking for an immediate next step.
+  let state = {}
+  let last = null
+  for (let i = 0; i < 12; i++) {
+    const step = Sources.plan("gios", state, KRAKOW, NOW)
+    if (!step) break
+    const raw = typeof answers[step.op] === "function" ? answers[step.op](step.input) : answers[step.op]
+    last = Sources.accept("gios", step.state, step.op, raw, KRAKOW, NOW)
+    state = last.state
+    if (!last.again) break
+  }
+  return last
+}
+
+test("GIOŚ: nearest station, its PM sensors, newest non-null value, official index", () => {
+  const seen = []
+  const r = walkGios({
+    "gios-stations": () => { seen.push("stations"); return fixture("gios-stations.json") },
+    "gios-sensors": (id) => { seen.push("sensors " + id); return fixture("gios-sensors.json") },
+    "gios-data": (id) => { seen.push("data " + id); return fixture("gios-data.json") },
+    "gios-index": (id) => { seen.push("index " + id); return fixture("gios-index.json") }
+  })
+  assert.deepEqual(seen, ["stations", "sensors 400", "data 2752", "data 2750", "index 400"])
+  const o = r.observation
+  assert.equal(o.source, "gios")
+  assert.equal(o.level, "GOOD")
+  assert.equal(o.readings.pm25.value, 21.1, "13:00 is null, so 12:00")
+  assert.equal(o.at, new Date(2026, 9, 19, 12, 0, 0).getTime())
+  assert.match(o.place, /Krasińskiego/)
+  assert.ok(o.distance > 800 && o.distance < 1300, String(o.distance))
+  assert.equal(r.again, false)
+  assert.equal(Sources.plan("gios", r.state, KRAKOW, NOW).op, "gios-data", "the next refresh starts a new cycle")
+})
+
+test("GIOŚ never sends coordinates", () => {
+  const step = Sources.plan("gios", {}, KRAKOW, NOW)
+  assert.equal(step.op, "gios-stations")
+  assert.equal(step.input, "")
+})
+
+test("GIOŚ: an all-null series is a status, not a zero", () => {
+  const empty = JSON.stringify({ "Lista danych pomiarowych": [{ "Data": "2026-10-19 13:00:00", "Wartość": null }] })
+  const r = walkGios({
+    "gios-stations": fixture("gios-stations.json"),
+    "gios-sensors": fixture("gios-sensors.json"),
+    "gios-data": empty,
+    "gios-index": JSON.stringify({ AqIndex: { "Wartość indeksu": null } })
+  })
+  assert.equal(r.observation, null)
+  assert.match(r.status, /no PM readings/)
+})
+
+test("GIOŚ: a station without PM sensors falls through to the next one", () => {
+  const noPm = JSON.stringify({ "Lista stanowisk pomiarowych dla podanej stacji": [
+    { "Identyfikator stanowiska": 1, "Wskaźnik - kod": "NO2" }] })
+  const ids = []
+  walkGios({
+    "gios-stations": fixture("gios-stations.json"),
+    "gios-sensors": (id) => { ids.push(id); return ids.length === 1 ? noPm : fixture("gios-sensors.json") },
+    "gios-data": fixture("gios-data.json"),
+    "gios-index": fixture("gios-index.json")
+  })
+  assert.equal(ids.length, 2)
+  assert.notEqual(ids[0], ids[1])
+})
+
+test("GIOŚ: nothing within 30 km", () => {
+  const far = { place: { name: "Sea", latitude: 55.5, longitude: 18.0 }, locker: "" }
+  const r = Sources.accept("gios", {}, "gios-stations", fixture("gios-stations.json"), far, NOW)
+  assert.equal(r.again, false)
+  assert.equal(r.status, "No GIOŚ station within 30 km")
+  assert.equal(Sources.plan("gios", r.state, far, NOW), null)
+})
