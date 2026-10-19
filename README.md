@@ -1,54 +1,55 @@
 # inAir
 
-Street-level air quality on your Omarchy bar, read from the sensor on the
-parcel locker down the street.
+Street-level air quality on your Omarchy bar: PM2.5 from the citizen sensors
+on your street, the official monitoring station nearby, a forecast model, and
+the index of the InPost parcel locker down the road, side by side.
 
 ![inAir's two skins side by side: terminal on the left, plain on the right](preview.png)
 
 <sub>Screenshots show a sensor in Wrocław and a made-up trend, for illustration.</sub>
 
 > **Unofficial.** inAir is an independent hobby project. It is not made,
-> endorsed, sponsored or supported by InPost S.A., and its author has no
-> connection with the company. It only reads air quality data that InPost
-> publishes openly on its website. "InPost" and "Paczkomat" are trademarks of
-> InPost S.A. and appear here only to say where the data comes from.
-
-> [!WARNING]
-> **Readings are blocked by InPost (since 7 October 2026).** The endpoint that
-> serves the sensor readings (`inpost.pl/shipx-point-data/…`) now sits behind a
-> Cloudflare rule that refuses any request not made by the inpost.pl website
-> itself, with HTTP 403. inAir therefore gets no readings: the pill shows
-> `󰵃 —`, and the panel says that InPost is blocking automated access. Finding
-> lockers and sensors still works, because that part of InPost's API is open.
->
-> There is nothing to fix on your side, and inAir will not try to get around
-> the block by pretending to be a browser. If InPost opens access again, the
-> readings come back on their own, without an update. InPost has published
-> nothing about the change; the same block broke the
-> [InPost Air Home Assistant integration](https://github.com/CyberDeer/InPost-Air/issues/130).
-> For this reason, removal of inAir from the Omarchy plugin marketplace has
-> been requested.
+> endorsed, sponsored or supported by Sensor.Community, GIOŚ, Open-Meteo,
+> ECMWF/Copernicus or InPost S.A., and its author has no connection with any
+> of them. It only reads data they publish openly. "InPost" and "Paczkomat"
+> are trademarks of InPost S.A. and appear here only to say where data comes
+> from.
 
 ## Where the data comes from
 
+inAir reads from up to four sources. You choose which, and in what order, the
+first time you open it; the first one that has fresh data drives the bar, and
+the panel shows all of them.
+
+| Source | What it is | Updates | Gives | Gets from you |
+|---|---|---|---|---|
+| **Sensor.Community** | citizen low-cost sensors on balconies and lamp posts | every 5 min | PM1*, PM2.5, PM10, temperature, humidity, pressure: the median of the nearest five sites | your coordinates, rounded to ~100 m |
+| **GIOŚ** | Poland's official monitoring stations | hourly, 1–2 h behind | PM2.5, PM10 and the official Polish index from the nearest station within 30 km | nothing: inAir downloads the whole station list and picks the nearest one itself |
+| **Open-Meteo** | the CAMS air quality **model**, on an ~11 km grid | every 15 min | PM2.5 and PM10 as modelled, not measured | your coordinates, rounded to ~100 m |
+| **InPost** | the sensor on the nearest parcel locker | every few minutes | the locker's index level only (see below) | your coordinates, rounded to ~100 m |
+
+\* PM1 comes only from sensors that measure it (SPS30).
+
+None of them needs an account or a key. Sensor.Community and GIOŚ are on by
+default. Sensor.Community is closest to the street but uses cheap sensors that
+read high in fog; GIOŚ is the reference but far between and an hour or two
+behind; Open-Meteo works anywhere but is a model, and inAir says so wherever it
+shows it.
+
+### InPost: index only
+
 In October 2021 InPost started fitting air quality sensors to its Paczkomat®
-parcel lockers. The first went up on 18 October 2021, on new lockers in cities
-that are partners in its *InPost Green City* programme. The company presented
-them as part of its anti-smog and climate effort, next to the point that
-delivering to a locker means fewer van trips through town
+lockers, as part of its *InPost Green City* programme
 ([press release, in Polish](https://inpost.pl/sites/default/files/docs/dla-prasy/20211020_SIEC_PACZKOMATOW_INPOST_PRZEKROCZYLA_15000.pdf)).
-The sensors have since spread to a great many lockers across Poland. Each one
-reports particulate matter, and many also report temperature, humidity and
-pressure. InPost shows the readings in its own app and on each locker's public
-page.
+inAir began as a widget for exactly those sensors.
 
-inAir finds the nearest locker that has a sensor, shows PM2.5 on the bar
-coloured by the air quality index, and opens a panel with everything the
-sensor publishes: PM1, PM2.5, PM4 and PM10 (with how much of the legal norm
-each one is using), plus temperature, humidity and pressure. These come from a
-street corner, not an average for the whole city.
-
-It works wherever there is a sensor, which in practice means Poland.
+Since 7 October 2026 InPost refuses automated requests for the readings
+(`inpost.pl/shipx-point-data/…` answers HTTP 403 from a Cloudflare rule).
+inAir will not get around that by pretending to be a browser, and makes no
+request to that endpoint. What InPost still publishes openly is each locker's
+index level, so with the InPost source on, the panel shows that level
+(`GOOD`, `MODERATE`…) and no numbers. The code that read the numbers is still
+in the plugin, switched off, for the day InPost opens access again.
 
 ## Install
 
@@ -59,34 +60,25 @@ omarchy plugin add https://github.com/priard/omarchy-inair --enable --yes
 The widget lands in the centre of the bar. Move it with
 `omarchy bar move priard.inair --section right`.
 
-### Finding a sensor
+### Setting up
 
-inAir looks for the sensors nearest to you, and needs something to measure
-"nearest" from. It uses the location Omarchy stores for the weather widget
-(`~/.local/state/omarchy/settings/weather.json`), but **by default Omarchy
-stores none:** the weather follows your IP address, and a location set by name
-alone has no coordinates. Then the pill shows `󰵃 —` and the panel says what is
-missing. Any one of these gets it going:
+Until it is set up the pill shows `󰵃 ⚙`. Click it, and the panel asks two
+things:
 
-- **Type your postcode.** Open the panel, press `/`, type e.g. `31-042` and
-  press Enter. The panel lists the sensors nearest to that postcode, with
-  distances, and starts reading the nearest one. The postcode is not stored;
-  the locker it found is, so the reading survives a restart.
-- **Set your location in the Weather widget.** Click the location in the
-  weather panel, type your town and pick it from the suggestions; that stores
-  coordinates. inAir notices within a minute and lists the sensors around you.
-- **Type a locker code**, e.g. `KRA80M`, the same way. It pins that locker and
-  lists the sensors around it.
-- From a terminal:
+1. **Where.** If the Weather widget has a location with coordinates, inAir
+   offers it. Otherwise, or if you want somewhere else, type a town or a
+   district (looked up by Open-Meteo's geocoder) or a Polish postcode (looked
+   up by InPost's locker search), press Enter and pick the result. inAir keeps
+   its own place; what you type is not stored.
+2. **Which sources, in which order.** Enter or Space switches a source on or
+   off, `[` and `]` move it up or down. The first one that is on is the
+   primary. Each source says which host gets your location.
 
-  ```bash
-  omarchy-weather-location --set "Kraków" 50.0614,19.9366   # name, then lat,lon
-  omarchy bar set priard.inair locker KRA80M                # or pin a locker
-  ```
+Choose **Done**, and the pill shows the primary source's PM2.5 within a few
+seconds. Everything stays changeable later with `o`.
 
-The search looks at the 300 nearest lockers, which reaches about 10 km from a
-village and a few km in a city. This plugin never looks up your location from
-your IP address.
+Upgrading from 0.8: the wizard opens once, with InPost already on and your
+pinned locker kept.
 
 ### Update
 
@@ -150,18 +142,27 @@ Inside the panel, the header buttons and their keys:
 
 | Button | Key | Does |
 |---|---|---|
-| 󰍉 | `/` or `c` | Opens the search field. A **postcode** (`31-042`) lists the sensors around it and reads the nearest if nothing is being read yet; a **locker code** (`KRA80M`) pins that locker, anywhere in Poland, and lists the sensors around it. Enter searches, Escape cancels. |
-| `PL` / `EU` | `i` | Shows which index is in use; click to switch. |
+| 󰍉 | `/` | Opens the settings page with the search field focused: a **town or district**, a **postcode** (`31-042`), or, with InPost on, a **locker code** (`KRA80M`) to pin that locker. |
+| `PL` / `EU` | `i` | Shows which index is in use; click to switch. InPost's level is always on the Polish scale. |
+| 󰒓 | `o` | Places and sources: the same page as the first-run wizard, plus the index scale, the skin and the refresh interval. |
 | 󰕮 / 󰆍 | `s` | Switches between the terminal and the plain skin. |
-| 󰑐 | `r` | Refreshes the readings and re-scans for sensors nearby. Spins while it works. |
+| 󰑐 | `r` | Asks every source again, now. Spins while it works. |
+| | `1`–`4` | Looks at that source in the big view without changing your order; `Esc` goes back. |
 
 Hover a button for a tooltip. A switch takes effect immediately and is saved
 to `shell.json`, so it survives a restart.
 
-- **Click any locker** in "Sensors in range" to pin it. "Follow the nearest
-  sensor" goes back to picking automatically.
-- A code typed by hand is looked up by code, so it works for a locker in a town
-  you are not in. That is handy for checking somewhere before you drive there.
+- **Sources.** Under the readings, one line per source you have on: its
+  level, PM2.5 and PM10, and how old its data is. Click one to look at it.
+  A source that has nothing for your place says why ("No Sensor.Community
+  sensor within 10 km", "No GIOŚ station with live PM data within 30 km").
+- **The primary source** is the first one in your order with fresh data. If
+  it goes quiet (Sensor.Community after 30 minutes, GIOŚ after three hours,
+  the others after two), the bar falls through to the next one.
+- **In the median.** For Sensor.Community, the sites the number came from and
+  how far away they are.
+- With InPost shown, its **lockers in range** are listed; click one to pin it,
+  "follow the nearest sensor" to go back.
 
 ### Skins
 
@@ -176,8 +177,8 @@ meters.
 │ [ VERY GOOD ]                  9.7 µg/m³ │
 │ GIOŚ INDEX                         PM2.5 │
 │                                          │
-│ ○ GDA175M · Elbląska 52                  │
-│   Gdańsk · 1.8 km · just now             │
+│ ◆ Sensor.Community · median of 5 sensors │
+│   1.8 km · 2 min ago                     │
 │                                          │
 │ PM1    ····················    3.7       │
 │ PM2.5  ████████░░░░░░░░░░░░    9.7   39% │
@@ -189,10 +190,10 @@ meters.
 │ RH     ██████████████████░░        92% → │
 │ hPa    ··············█·····       1031 ↓ │
 │                                          │
-├─ SENSORS IN RANGE ───────────────────────┤
-│ › GDA175M    Elbląska 52          1.8 km │
-│   GDA163M    Nad Jarem 31A        2.1 km │
-│ / code · i index · s skin · r refresh    │
+├─ SOURCES ────────────────────────────────┤
+│ › ● 1 Sensor.Community PM2.5 10 2 min ago│
+│   ● 2 GIOŚ             PM2.5 14   44 min │
+│ / find · o setup · 1-4 source · i s r    │
 └──────────────────────────────────────────┘
 ```
 
@@ -211,11 +212,11 @@ version shows, and PM2.5 is drawn large in square pixel digits.
   stood at in its own slice of time, worked out from that slice's PM2.5 and
   PM10 on the scale in use, so a smoggy morning stays red after the air has
   cleared. Only those two values are stored, so a cell can now and then differ
-  from the level InPost showed at the time. The readings are kept in a small
-  private file (see below), so a shell restart or a plugin update does not
-  wipe the trend. Each locker has its own trend, and the four used most
-  recently are kept, so a look at another locker does not cost you yours.
-- **Street weather**, in the same block cells as the meters. Temperature is a
+  from the level the source showed at the time. The readings are kept in a
+  small private file (see below), so a shell restart or a plugin update does
+  not wipe the trend. The trend follows the primary source and is kept per
+  source and place, so it never mixes two streets or two sources.
+- **Street weather** (Sensor.Community), in the same block cells as the meters. Temperature is a
   heat strip on a −20…40 °C scale, each cell coloured by the temperature it
   stands for, from cold blue to hot red. Humidity fills 0–100%. Pressure is a
   single block on a dotted 970–1050 hPa ruler. Each row has an arrow showing
@@ -231,61 +232,64 @@ measured.
 
 ![The plain skin: motes drifting behind the headline, the trend chart's latest point pulsing](docs/inair-plain.gif)
 
-Readings refresh every five minutes. A failed refresh leaves the last reading
-on screen rather than blanking the bar.
+Each source refreshes on its own schedule: every `refreshMinutes`, but never
+more often than the source itself updates. A failed refresh leaves the last
+reading on screen, and a source that keeps failing waits longer between tries,
+up to an hour.
 
 ## Configure
 
-Settings live in the widget's entry in `~/.config/omarchy/shell.json` and take
-effect on save, whether you edit the file by hand or use `omarchy bar set`:
+Most of it is in the panel (`o`). Settings live in the widget's entry in
+`~/.config/omarchy/shell.json` and take effect on save, whether you edit the
+file by hand or use `omarchy bar set`:
 
 ```bash
-omarchy bar set priard.inair locker KRA80M   # pin one locker
-omarchy bar set priard.inair locker ""       # back to the nearest sensor
 omarchy bar set priard.inair index european
 omarchy bar set priard.inair style plain
+omarchy bar set priard.inair locker KRA80M   # pin an InPost locker
 ```
 
 ```json
-{ "id": "priard.inair", "locker": "", "index": "polish", "style": "terminal", "refreshMinutes": 5 }
+{ "id": "priard.inair", "sources": ["sensorcommunity", "gios"], "place": { "name": "Kraków", "latitude": 50.06, "longitude": 19.94 }, "setupDone": true, "index": "polish", "style": "terminal", "refreshMinutes": 5 }
 ```
 
 | Key | Default | Meaning |
 |---|---|---|
-| `locker` | `""` | Locker code to pin, e.g. `"KRA80M"`. Empty follows the nearest sensor. |
+| `sources` | `["sensorcommunity", "gios"]` | Sources in priority order: `sensorcommunity`, `gios`, `openmeteo`, `inpost`. |
+| `place` | none | Where to read: `{ name, latitude, longitude }`. Without it, the Weather widget's location. |
+| `setupDone` | `false` | Whether the first-run wizard has been through. |
+| `locker` | `""` | InPost locker to pin, e.g. `"KRA80M"`. Empty follows the nearest one with a sensor. |
 | `index` | `"polish"` | `"polish"` for the GIOŚ scale, `"european"` for the EEA one. |
 | `style` | `"terminal"` | `"terminal"` for the character-grid skin, `"plain"` for ordinary widgets. |
-| `refreshMinutes` | `5` | How often to re-read the sensor, clamped to 1–60. |
-| `resolvedCode`, `resolvedId` | — | Written by the plugin: the locker it settled on and its numeric id, so the next session skips discovery. Delete them to force a fresh look, but see below. |
+| `refreshMinutes` | `5` | How often to refresh, clamped to 1–60; no source is asked more often than it updates. |
 
-Not every locker with a sensor has a public page, and without that page there
-is no numeric id and so no readings. When that happens the plugin moves on to
-the next sensor in range instead of reporting a failure. InPost also takes
-pages down now and then while the sensor keeps reporting; a locker whose id is
-already cached keeps working, which is one more reason not to delete
-`resolvedId` without need.
+`resolvedCode` and `resolvedId` may remain from 0.8; 0.9 no longer uses them.
 
 ## What it talks to, and what it writes
 
-Public InPost endpoints only. No account, no API key, no credential of any
-kind:
+Public endpoints only. No account, no API key, no credential of any kind:
 
-| Endpoint | When | What for |
-|---|---|---|
-| `GET api-shipx-pl.easypack24.net/v1/points?relative_point=…` | on discovery, at most hourly; after a locker code is typed | which lockers near you, or near that locker, have a sensor |
-| `GET api-shipx-pl.easypack24.net/v1/points?relative_post_code=…` | when you search a postcode | which lockers near that postcode have a sensor |
-| `GET api-shipx-pl.easypack24.net/v1/points/<code>` | when you type or pin a locker code | that locker's address, location and whether it has a sensor |
-| `GET inpost.pl/<locker-page>` | once per locker, then cached | the locker's numeric id |
-| `POST inpost.pl/shipx-point-data/<id>/<code>/air_index_level` | every `refreshMinutes` | the readings |
+| Endpoint | When | What for | Receives |
+|---|---|---|---|
+| `GET data.sensor.community/airrohr/v1/filter/box=…` | every 5 min or more | the sensors around your place | a box around your place, rounded to ~100 m |
+| `GET api.gios.gov.pl/pjp-api/v1/rest/station/findAll` | once a session and on a new place | all GIOŚ stations, to pick the nearest here | nothing |
+| `GET api.gios.gov.pl/pjp-api/v1/rest/station/sensors/<id>`, `data/getData/<id>`, `aqindex/getIndex/<id>` | every 20 min or more | that station's sensors, readings and index | the station's id |
+| `GET air-quality-api.open-meteo.com/v1/air-quality?…` | every 15 min or more | modelled PM for your place | your place, rounded to ~100 m |
+| `GET api-shipx-pl.easypack24.net/v1/points?relative_point=…` | when InPost is on and finds its locker | the nearest locker with a sensor | your place, rounded to ~100 m |
+| `GET api-shipx-pl.easypack24.net/v1/points/<code>` | every `refreshMinutes` with InPost on | that locker's index level | the locker's code |
+| `GET api-shipx-pl.easypack24.net/v1/points?relative_post_code=…` | when you search a postcode | a point near that postcode, to stand for it | the postcode |
+| `GET geocoding-api.open-meteo.com/v1/search?name=…` | when you search a place name | matching places | what you typed |
 
-Your coordinates, or a postcode you search for, go to InPost's locker search,
-the same way they would if you used their locker finder. Nothing else leaves the machine. Requests identify
-themselves with the user agent `omarchy-inair`.
+Only the sources you switch on are asked anything. Nothing else leaves the
+machine, and inAir never looks up your location from your IP address.
+Requests identify themselves with the user agent `omarchy-inair`.
 
-Every request goes through `bin/inair-fetch`. It only accepts arguments that
-match fixed patterns, refuses redirects and proxies, caps the size of every
-response, and kills the request after a deadline. What a request is about
-(coordinates, a postcode, a locker code) never appears on a command line,
+Every request goes through `bin/inair-fetch`. It knows only the hosts above,
+builds each URL itself from a fixed template, only accepts arguments that
+match fixed patterns (a typed place name leaves as percent-encoded bytes),
+refuses redirects and proxies, caps the size of every response, and kills the
+request after a deadline. What a request is about (coordinates, a postcode, a
+place name, a locker code) never appears on a command line,
 where any user of the machine could read it in `/proc`: the widget hands it to
 the helper on stdin, and the helper hands the URL to curl the same way.
 
@@ -293,19 +297,19 @@ Files:
 
 | Path | Access | What |
 |---|---|---|
-| `~/.config/omarchy/shell.json` | its own entry only | settings, and the resolved locker id |
+| `~/.config/omarchy/shell.json` | its own entry only | settings, including the place you chose (name and coordinates) |
 | `~/.local/state/omarchy/settings/weather.json` | read only | Omarchy's location, never modified |
-| `~/.local/state/priard.inair/history.json` | read and write | the trend: for the four lockers used most recently, their codes and readings from the last 24 hours |
+| `~/.local/state/priard.inair/history.json` | read and write | the trend: for the four source-and-place pairs used most recently, a key such as `sc:50.06,19.94`, `gios:400` or `inpost:KRA80M`, and readings from the last 24 hours |
 
 The trend file is the only file the plugin creates. It is small (at most four
-lockers of 320 readings each, capped at 256 KiB) and drops anything older than
-a day on every write; when a fifth locker comes along, the one read least
-recently goes. Because locker codes say roughly where you are and where you
-looked, it is private from the moment it is created: mode 0600 in a 0700
+keys of 320 readings each, capped at 256 KiB) and drops anything older than a
+day on every write; when a fifth comes along, the one read least recently
+goes. Because its keys say roughly where you are and where you looked, it is
+private from the moment it is created: mode 0600 in a 0700
 directory. All access goes through `bin/inair-history`, which refuses a
 symlink, a FIFO, a file someone else owns or one that is too large, and writes
 through a fresh temporary file that is renamed over the old one. Readings and
-locker codes travel to it on stdin, never on the command line.
+keys travel to it on stdin, never on the command line.
 
 ## Remove
 
@@ -319,8 +323,8 @@ configuration to clean up, and no privileges were granted, so none need
 revoking.
 
 One file survives removal: the trend history,
-`~/.local/state/priard.inair/history.json`, which holds up to four locker
-codes and a day of readings for each. Delete it, and its directory, yourself if you want no trace
+`~/.local/state/priard.inair/history.json`, which holds up to four
+source-and-place keys and a day of readings for each. Delete it, and its directory, yourself if you want no trace
 left:
 
 ```bash
@@ -328,13 +332,24 @@ rm ~/.local/state/priard.inair/history.json
 rmdir ~/.local/state/priard.inair
 ```
 
-## Credit
+## Credit and data licences
 
-The endpoints were mapped by [CyberDeer's InPost-Air](https://github.com/CyberDeer/InPost-Air)
-Home Assistant integration. The index thresholds come from
-[GIOŚ](https://powietrze.gios.gov.pl/pjp/content/health_informations) and the
-[EEA](https://www.eea.europa.eu/themes/air/air-quality-index). The sensors and
-their data belong to InPost; this plugin only displays them.
+- **Sensor.Community** data is published under the
+  [Open Data Commons DbCL 1.0](https://opendatacommons.org/licenses/dbcl/1-0/);
+  the sensors belong to the volunteers who run them.
+- **GIOŚ**: Źródło danych: Główny Inspektorat Ochrony Środowiska
+  ([API](https://powietrze.gios.gov.pl/pjp/content/api)). Data are current and
+  unverified.
+- **Open-Meteo**: air quality from the Copernicus Atmosphere Monitoring Service
+  (CAMS), served by [Open-Meteo](https://open-meteo.com/) under
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- **InPost**: the locker sensors and their index belong to InPost; the
+  endpoints were mapped by [CyberDeer's InPost-Air](https://github.com/CyberDeer/InPost-Air)
+  Home Assistant integration.
+- Index thresholds from [GIOŚ](https://powietrze.gios.gov.pl/pjp/content/health_informations)
+  and the [EEA](https://www.eea.europa.eu/themes/air/air-quality-index).
+
+The panel names the sources you have on in its footer.
 
 ## License
 

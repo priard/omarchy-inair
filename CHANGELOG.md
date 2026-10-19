@@ -4,6 +4,52 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] — 2026-10-19
+
+### Added
+
+- **More sources than InPost.** Sensor.Community (citizen sensors, every
+  5 minutes, the median of the nearest five sites), GIOŚ (official stations
+  and the Polish index, hourly) and Open-Meteo (the CAMS model, labelled as a
+  model). None needs a key. Each runs on its own schedule with its own
+  backoff, and the pill shows the first one in your order that has fresh
+  data.
+- **A panel that compares them.** One line per enabled source; click it or
+  press 1–4 to look at that source, Esc to go back.
+- **Place search.** `/` takes a town or district (Open-Meteo's geocoder), a
+  postcode (InPost's ShipX) or a locker code. inAir keeps its own place and
+  falls back to the Weather widget's.
+- **First-run wizard and settings** (`o`): place, sources and their order,
+  index scale, skin and refresh interval. Each source says which host gets
+  your location.
+- Tests: `node --test tests/` and `bash tests/fetch.test.sh`, offline, plus
+  `tests/smoke.sh` against the live APIs.
+
+### Changed
+
+- **InPost is now one source among four, and an index-only one.** InPost has
+  blocked its readings since 7 October 2026; inAir shows the level ShipX still
+  publishes (`󰵃 GOOD`) and never calls the blocked endpoint. The old readings
+  code stays, switched off, for the day access returns.
+- Coordinates sent anywhere are rounded to three decimals (~100 m). GIOŚ gets
+  none: its station list is fetched whole and the nearest station picked here.
+  A station that samples PM by hand (whose results GIOŚ publishes weeks later)
+  is skipped for the next nearest.
+- Histories are kept per source and place (`sc:50.06,19.94`, `gios:400`,
+  `inpost:KRA80M`); 0.8 locker histories still read.
+- Upgrading from 0.8 opens the wizard once, with InPost and your pinned
+  locker kept.
+
+### Fixed
+
+- **Panel text was black on dark themes.** The theme was read as `Color`,
+  which inside a plugin does not resolve to the shell's palette; every colour
+  came back undefined and the text fell back to black. It is now read as
+  `Commons.Color`.
+- **Two quick clicks in the panel could undo each other.** The shell echoes a
+  settings write back late, and sometimes not at all; the first echo used to
+  wipe the second click. A click now holds until its own write lands.
+
 ## [0.8.2] — 2026-10-07
 
 ### Fixed

@@ -4,8 +4,9 @@ import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
-// The pill: an air-filter glyph and PM2.5 as a whole number, coloured by the
-// air quality index. The panel below it owns all the state and all the
+// The pill: an air-filter glyph and PM2.5 as a whole number (or the index
+// level, when the primary source publishes only that), coloured by the air
+// quality index. The panel below it owns all the state and all the
 // fetching; this file only renders what the panel resolved and forwards the
 // bar's lifecycle calls, the same split the built-in weather widget uses.
 BarWidget {
