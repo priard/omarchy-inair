@@ -402,6 +402,115 @@ function fetchFailure(exitCode, stderrText, lockerCode) {
   return "Sensor unreachable"
 }
 
+// ------------------------------------------------- shared by the sources
+
+// Every source ends up in the shape InPost's readings had: a value and, for
+// PM2.5 and PM10, how much of the legal norm it uses. The norms are the ones
+// InPost measured against (25 and 50 µg/m³), so a meter means the same thing
+// whichever source fills it. Anything outside a range a real sensor can report
+// is dropped here rather than drawn.
+var NORMS = { pm25: 25, pm10: 50 }
+
+var RANGES = {
+  pm1: [0, 1000],
+  pm25: [0, 1000],
+  pm10: [0, 1000],
+  temperature: [-50, 60],
+  humidity: [0, 100],
+  pressure: [850, 1100]
+}
+
+function buildReadings(values) {
+  var readings = Object.create(null)
+  for (var field in RANGES) {
+    var v = values ? values[field] : null
+    if (typeof v !== "number" || !isFinite(v)) continue
+    if (v < RANGES[field][0] || v > RANGES[field][1]) continue
+    readings[field] = {
+      value: v,
+      norm: NORMS[field] ? Math.round(v / NORMS[field] * 10000) / 100 : null
+    }
+  }
+  return readings
+}
+
+function median(values) {
+  var xs = []
+  for (var i = 0; i < (values ? values.length : 0); i++) if (isNumber(values[i])) xs.push(values[i])
+  if (xs.length === 0) return null
+  xs.sort(function(a, b) { return a - b })
+  var mid = Math.floor(xs.length / 2)
+  return xs.length % 2 ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2
+}
+
+// Great-circle distance; at street scale the earth is as good as a sphere.
+function distanceMetres(lat1, lon1, lat2, lon2) {
+  var rad = Math.PI / 180
+  var dLat = (lat2 - lat1) * rad
+  var dLon = (lon2 - lon1) * rad
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+    + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) * Math.sin(dLon / 2)
+  return Math.round(6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)))
+}
+
+// Three decimals is about 100 m: plenty to find the sensors around a street,
+// and no more of where somebody lives than that goes to anyone.
+function roundCoord(value) {
+  return Number(value).toFixed(3)
+}
+
+function validPlace(place) {
+  return !!place && typeof place.latitude === "number" && typeof place.longitude === "number"
+    && isFinite(place.latitude) && isFinite(place.longitude)
+    && Math.abs(place.latitude) <= 90 && Math.abs(place.longitude) <= 180
+}
+
+// GIOŚ publishes its index as a number, 0 (very good) to 5 (very bad).
+var GIOS_INDEX = ["VERY_GOOD", "GOOD", "MODERATE", "SUFFICIENT", "BAD", "VERY_BAD"]
+
+function giosLevel(n) {
+  return typeof n === "number" && n >= 0 && n <= 5 && n % 1 === 0 ? GIOS_INDEX[n] : ""
+}
+
+// GIOŚ and Open-Meteo (with timezone=auto) both speak Polish local time
+// without an offset; read as the machine's own local time, which for the
+// people this plugin is for is the same thing.
+function parseLocalTime(text) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(trimmed(text))
+  if (!m) return null
+  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], m[6] ? +m[6] : 0).getTime()
+}
+
+// The pill: a gear before anything is set up, PM2.5 when the source measures
+// it, the short level when it only publishes an index (InPost), a dash when
+// nothing has answered yet.
+function pillLabel(observation, setupNeeded) {
+  if (setupNeeded) return "󰵃 ⚙"
+  var number = pillText(observation)
+  if (number !== "") return "󰵃 " + number
+  if (observation && observation.level) return "󰵃 " + levelInfo(observation.level, "polish").short
+  return "󰵃 —"
+}
+
+// fetchFailure, for any source: the same reading of curl's exit status and
+// error text, worded around the source's own name.
+function sourceFailure(label, exitCode, stderrText) {
+  var who = plain(label, 32)
+  if (exitCode === 22) {
+    var http = httpStatusIn(stderrText)
+    if (http === 403) return who + " refused the request (HTTP 403)"
+    if (http === 404) return who + " has nothing at that address (HTTP 404)"
+    if (http === 429) return who + " is limiting requests (HTTP 429); trying again later"
+    if (http >= 500) return who + "'s server is failing (HTTP " + http + "); trying again later"
+    if (http > 0) return who + " answered HTTP " + http
+    return who + " refused the request"
+  }
+  if (exitCode === 6) return "Cannot resolve " + who + " — is the network up?"
+  if (exitCode === 7) return "Cannot connect to " + who
+  if (exitCode === 28 || exitCode === 124 || exitCode === 137) return who + " did not answer in time"
+  return who + " is unreachable"
+}
+
 // ------------------------------------------------------------ formatting
 
 function formatDistance(metres) {
@@ -984,6 +1093,15 @@ if (typeof module !== "undefined") {
     weatherCells: weatherCells,
     airDensity: airDensity,
     airFlowRows: airFlowRows,
+    buildReadings: buildReadings,
+    median: median,
+    distanceMetres: distanceMetres,
+    roundCoord: roundCoord,
+    validPlace: validPlace,
+    giosLevel: giosLevel,
+    parseLocalTime: parseLocalTime,
+    pillLabel: pillLabel,
+    sourceFailure: sourceFailure,
     LEVELS: LEVELS,
     EU_LEVELS: EU_LEVELS
   }
