@@ -283,7 +283,7 @@ function plan(id, state, context, now) {
   var c = context || {}
   if (id === "sensorcommunity") return scPlan(s, c)
   if (id === "openmeteo") return omPlan(s, c)
-  if (id === "gios") return giosPlan(s, c)
+  if (id === "gios") return giosPlan(s, c, now)
   if (id === "inpost") return inpostPlan(s, c)
   return null
 }
@@ -291,8 +291,11 @@ function plan(id, state, context, now) {
 // A refusal that means "not here" rather than "not now": the source moves on
 // instead of retrying the same request with a backoff. Null leaves it an
 // ordinary failure for the runner.
-function reject(id, state, op, http) {
-  if (id === "gios" && op === "gios-data" && http === 400) return giosNextStation(state || {}, true)
+function reject(id, state, op, http, now) {
+  if (id === "gios" && op === "gios-data" && http === 400) return giosDropSensor(state || {}, now)
+  // The index is a verdict on readings already in hand; without it they are
+  // still worth showing, with the level computed from PM.
+  if (id === "gios" && op === "gios-index") return giosAccept(state || {}, op, "{\"AqIndex\":{}}", {}, now)
   return null
 }
 
@@ -316,6 +319,9 @@ var GIOS_KEYS = {
 }
 var GIOS_RANGE_M = 30000
 var GIOS_TRIES = 5
+// With every nearby station tried and none answering, the list is asked for
+// again this long after: stations come back, and a refusal can be passing.
+var GIOS_RETRY_MS = 6 * 3600 * 1000
 
 function giosStations(data, place) {
   var list = data && Array.isArray(data[GIOS_KEYS.stations]) ? data[GIOS_KEYS.stations] : null
@@ -336,24 +342,30 @@ function giosStations(data, place) {
   return out.slice(0, GIOS_TRIES)
 }
 
+// A station can list more than one sensor for a pollutant (an automatic and
+// a manual one); each field keeps its candidates in order and reads the first.
 function giosCycle(state) {
   var cycle = []
-  if (state.sensors.pm25 !== undefined) cycle.push("pm25")
-  if (state.sensors.pm10 !== undefined) cycle.push("pm10")
+  if (state.sensors.pm25 && state.sensors.pm25.length) cycle.push("pm25")
+  if (state.sensors.pm10 && state.sensors.pm10.length) cycle.push("pm10")
   cycle.push("index")
   return cycle
 }
 
-function giosPlan(state, context) {
+function giosPlan(state, context, now) {
   if (!Model.validPlace(context.place)) return null
   if (!state.stations) return { op: "gios-stations", input: "", state: state }
-  if (!state.station) return null
+  if (!state.station) {
+    if (state.exhaustedAt && (now || 0) - state.exhaustedAt > GIOS_RETRY_MS)
+      return { op: "gios-stations", input: "", state: {} }
+    return null
+  }
   if (!state.sensors) return { op: "gios-sensors", input: String(state.station.id), state: state }
   var fresh = !state.cycle || state.cycle.length === 0
   var next = fresh ? copy(state, { cycle: giosCycle(state), values: {}, level: "" }) : state
   var head = next.cycle[0]
   if (head === "index") return { op: "gios-index", input: String(next.station.id), state: next }
-  return { op: "gios-data", input: String(next.sensors[head]), state: next }
+  return { op: "gios-data", input: String(next.sensors[head][0]), state: next }
 }
 
 // The series comes newest first, and the newest hour is often still null.
@@ -394,15 +406,32 @@ function giosObservation(state) {
 }
 
 // The station tried has nothing to read now: no PM sensor at all, or (`manual`)
-// a PM sensor sampled by hand, whose results GIOŚ publishes weeks later and
-// refuses with HTTP 400 until then. Try the next nearest.
-function giosNextStation(state, manual) {
+// only PM sensors sampled by hand. Try the next nearest.
+function giosNextStation(state, manual, now) {
   var rest = (state.stations || []).filter(function(s) { return !state.station || s.id !== state.station.id })
   var after = { stations: rest, station: rest[0] || null }
-  if (!after.station)
+  if (!after.station) {
+    after.exhaustedAt = now || Date.now()
     return result(after, null, manual ? "No GIOŚ station with live PM data within 30 km"
                                       : "No GIOŚ station with PM measurements within 30 km", false)
+  }
   return result(after, null, "", true)
+}
+
+// A PM sensor sampled by hand: GIOŚ publishes its results weeks later and
+// refuses with HTTP 400 until then. Drop that one sensor; the station's other
+// candidates for the same pollutant, or its other pollutant, still count, and
+// only a station left with no PM sensor at all is given up.
+function giosDropSensor(state, now) {
+  var field = state.cycle ? state.cycle[0] : null
+  if (!state.sensors || (field !== "pm25" && field !== "pm10")) return giosNextStation(state, true, now)
+  var sensors = copy(state.sensors)
+  var left = (sensors[field] || []).slice(1)
+  if (left.length) sensors[field] = left
+  else delete sensors[field]
+  if (!sensors.pm25 && !sensors.pm10) return giosNextStation(state, true, now)
+  var cycle = left.length ? state.cycle : state.cycle.slice(1)
+  return result(copy(state, { sensors: sensors, cycle: cycle }), null, "", true)
 }
 
 function giosAccept(state, op, raw, context, now) {
@@ -413,7 +442,10 @@ function giosAccept(state, op, raw, context, now) {
     var stations = giosStations(data, context.place)
     if (stations === null) return unexpected("gios", state)
     var next = { stations: stations, station: stations[0] || null }
-    if (!next.station) return result(next, null, "No GIOŚ station within 30 km", false)
+    if (!next.station) {
+      next.exhaustedAt = now || Date.now()
+      return result(next, null, "No GIOŚ station within 30 km", false)
+    }
     return result(next, null, "", true)
   }
 
@@ -424,12 +456,11 @@ function giosAccept(state, op, raw, context, now) {
       var code = list[i] ? String(list[i]["Wskaźnik - kod"]) : ""
       var id = list[i] ? Model.finiteOr(list[i]["Identyfikator stanowiska"], null) : null
       if (id === null || id % 1 !== 0 || id < 0) continue
-      if (code === "PM2.5") sensors.pm25 = id
-      else if (code === "PM10") sensors.pm10 = id
+      var field = code === "PM2.5" ? "pm25" : (code === "PM10" ? "pm10" : "")
+      if (field) sensors[field] = (sensors[field] || []).concat([id]).slice(0, 4)
     }
-    if (sensors.pm25 !== undefined || sensors.pm10 !== undefined)
-      return result(copy(state, { sensors: sensors }), null, "", true)
-    return giosNextStation(state, false)
+    if (sensors.pm25 || sensors.pm10) return result(copy(state, { sensors: sensors }), null, "", true)
+    return giosNextStation(state, false, now)
   }
 
   var cycle = (state.cycle || []).slice(1)
@@ -545,6 +576,14 @@ function nextDelayMs(id, failures, http, refreshMinutes) {
   var delay = failures > 0 ? Math.min(base * Math.pow(2, failures), 60 * MINUTE) : base
   if (http === 429) delay = Math.max(delay, 15 * MINUTE)
   return delay
+}
+
+// Opening the panel asks a source again only if its last fetch is older than
+// the source updates, and never while it is backing off: the timer owns that.
+function dueOnOpen(id, lastFetchAt, failures, now) {
+  var meta = info(id)
+  if (!meta || failures > 0) return false
+  return now - (lastFetchAt || 0) >= meta.minRefreshMinutes * MINUTE
 }
 
 // --------------------------------------------------------------- settings

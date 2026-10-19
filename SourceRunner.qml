@@ -26,6 +26,10 @@ Item {
   property string status: ""
   property int failures: 0
   property int lastHttp: 0
+  // When the last request finished, whatever it brought: what opening the
+  // panel measures against, since an observation's own time is when it was
+  // measured, an hour back for GIOŚ.
+  property double lastFetchAt: 0
   readonly property bool busy: proc.running
   readonly property var meta: Sources.info(sourceId)
 
@@ -48,6 +52,7 @@ Item {
     status = ""
     failures = 0
     lastHttp = 0
+    lastFetchAt = 0
     publish()
     Qt.callLater(step)
   }
@@ -59,7 +64,12 @@ Item {
   function step() {
     if (!alive || proc.running || !meta) return
     var next = Sources.plan(sourceId, state, context, Date.now())
-    if (!next) return
+    // Nothing to ask for now (no place, or every station tried): look again
+    // at the next refresh, which is when a plan can change its mind.
+    if (!next) {
+      schedule()
+      return
+    }
     state = next.state
     proc.op = next.op
     proc.input = next.input
@@ -78,11 +88,14 @@ Item {
     step()
   }
 
-  // Opening the panel: only a source with nothing recent asks again.
+  // Opening the panel: only a source not asked recently asks again, and
+  // one that is backing off is left to its timer.
   function refreshIfStale() {
     if (proc.running || !meta) return
-    var age = observation ? Date.now() - observation.at : Infinity
-    if (age > meta.minRefreshMinutes * 60000) refresh()
+    if (Sources.dueOnOpen(sourceId, lastFetchAt, failures, Date.now())) {
+      timer.stop()
+      step()
+    }
   }
 
   function schedule() {
@@ -156,6 +169,7 @@ Item {
       proc.buffer = ""
       proc.errors = ""
       proc.overflow = false
+      if (!proc.stale) runner.lastFetchAt = Date.now()
       if (proc.stale) {
         proc.stale = false
         Qt.callLater(runner.step)
@@ -163,10 +177,12 @@ Item {
       }
       // Some refusals mean "not here" and send the source on to its next
       // candidate rather than into a backoff.
-      var rejected = code === 22 ? Sources.reject(runner.sourceId, runner.state, proc.op, Model.httpStatusIn(errors)) : null
+      var rejected = code !== 0 && !overflow
+        ? Sources.reject(runner.sourceId, runner.state, proc.op, Model.httpStatusIn(errors), Date.now()) : null
       if (rejected) {
         runner.state = rejected.state
         runner.status = rejected.status
+        if (rejected.observation) runner.observation = rejected.observation
         runner.publish()
         if (rejected.again) Qt.callLater(runner.step)
         else runner.schedule()

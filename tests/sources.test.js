@@ -276,13 +276,13 @@ test("historyKey, describe and attribution", () => {
 
 test("GIOŚ: a manual station (HTTP 400 on its data) hands over to the next station", () => {
   const two = [{ id: 875, name: "Nidzica", distance: 367 }, { id: 400, name: "Next", distance: 9000 }]
-  const midCycle = { stations: two, station: two[0], sensors: { pm10: 5744 }, cycle: ["pm10", "index"], values: {}, level: "" }
+  const midCycle = { stations: two, station: two[0], sensors: { pm10: [5744] }, cycle: ["pm10", "index"], values: {}, level: "" }
   const r = Sources.reject("gios", midCycle, "gios-data", 400)
   assert.equal(r.again, true)
   assert.equal(r.state.station.id, 400)
   assert.equal(r.state.sensors, undefined, "the next station's sensors are looked up afresh")
   assert.equal(Sources.plan("gios", r.state, KRAKOW, NOW).op, "gios-sensors")
-  const last = Sources.reject("gios", { stations: [two[0]], station: two[0], sensors: { pm10: 5744 }, cycle: ["pm10"] }, "gios-data", 400)
+  const last = Sources.reject("gios", { stations: [two[0]], station: two[0], sensors: { pm10: [5744] }, cycle: ["pm10"] }, "gios-data", 400)
   assert.equal(last.again, false)
   assert.match(last.status, /live PM/)
   assert.equal(Sources.reject("gios", midCycle, "gios-data", 503), null, "a server error is an ordinary failure")
@@ -297,4 +297,42 @@ test("Sensor.Community widens the box while fewer than three sites answer", () =
   assert.equal(r.observation, null)
   const atMax = Sources.accept("sensorcommunity", { radius: 2 }, "sc-box", one, KRAKOW, NOW)
   assert.equal(atMax.observation.count, 1, "at the widest box one site is better than none")
+})
+
+test("GIOŚ: a failing index call still shows the PM it already has", () => {
+  const station = { id: 400, name: "Kraków", distance: 900 }
+  const atIndex = { stations: [station], station: station, sensors: { pm25: [2752] }, cycle: ["index"],
+    values: { pm25: { value: 21.1, at: NOW - 3600000 } }, level: "" }
+  const r = Sources.reject("gios", atIndex, "gios-index", 503)
+  assert.ok(r, "handled, not left to the backoff")
+  assert.equal(r.observation.readings.pm25.value, 21.1)
+  assert.equal(r.observation.level, "")
+  assert.equal(Sources.reject("gios", atIndex, "gios-index", 0).observation.readings.pm25.value, 21.1, "a timeout too")
+})
+
+test("GIOŚ: a manual sensor (HTTP 400) is dropped, the station's other PM sensor kept", () => {
+  const two = [{ id: 875, name: "Mixed", distance: 367 }, { id: 400, name: "Next", distance: 9000 }]
+  const mixed = { stations: two, station: two[0], sensors: { pm25: [5745], pm10: [5744, 5746] },
+    cycle: ["pm10", "index"], values: {}, level: "" }
+  let r = Sources.reject("gios", mixed, "gios-data", 400)
+  assert.equal(r.again, true)
+  assert.equal(r.state.station.id, 875, "the station stays")
+  assert.deepEqual([...r.state.sensors.pm10], [5746], "the next PM10 sensor of the same station is tried")
+  const step = Sources.plan("gios", r.state, KRAKOW, NOW)
+  assert.deepEqual({ op: step.op, input: step.input }, { op: "gios-data", input: "5746" })
+})
+
+test("GIOŚ: with every station used up, the list is asked for again after six hours", () => {
+  const done = Sources.reject("gios", { stations: [{ id: 1, name: "x", distance: 1 }], station: { id: 1, name: "x", distance: 1 },
+    sensors: { pm10: [9] }, cycle: ["pm10"], values: {}, level: "" }, "gios-data", 400, NOW)
+  assert.equal(done.again, false)
+  assert.equal(Sources.plan("gios", done.state, KRAKOW, NOW + 60000), null)
+  assert.equal(Sources.plan("gios", done.state, KRAKOW, NOW + 6 * 3600000 + 1).op, "gios-stations")
+})
+
+test("dueOnOpen: opening the panel neither skips a backoff nor re-asks a fresh source", () => {
+  assert.equal(Sources.dueOnOpen("gios", NOW - 5 * 60000, 0, NOW), false, "fetched 5 min ago; GIOŚ updates every 20")
+  assert.equal(Sources.dueOnOpen("gios", NOW - 25 * 60000, 0, NOW), true)
+  assert.equal(Sources.dueOnOpen("gios", NOW - 25 * 60000, 2, NOW), false, "backing off: leave it to the timer")
+  assert.equal(Sources.dueOnOpen("sensorcommunity", 0, 0, NOW), true, "never fetched")
 })
