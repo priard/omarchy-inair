@@ -182,6 +182,7 @@ Panel {
   }
 
   readonly property string levelScale: scaleFor(air)
+  readonly property string indexName: levelScale === "european" ? "EEA INDEX" : "GIOŚ INDEX"
   readonly property string levelKey: Model.effectiveLevel(air, levelScale)
   readonly property var levelMeta: Model.levelInfo(levelKey, levelScale)
 

@@ -104,6 +104,9 @@ var SC_FIELDS = {
 var SC_PM = ["pm1", "pm25", "pm10"]
 var SC_WEATHER = ["temperature", "humidity", "pressure"]
 var SC_NEAREST = 5
+// A median needs a few voices: the box keeps widening until this many sites
+// answer, and only the widest box settles for fewer.
+var SC_ENOUGH = 3
 
 function scBox(place, km) {
   var dLat = km / 111.32
@@ -209,9 +212,11 @@ function scAccept(state, raw, context, now) {
   }
   for (i = 0; i < SC_WEATHER.length; i++) values[SC_WEATHER[i]] = scField(locations, SC_WEATHER[i]).value
 
+  var radius = state.radius || 0
+  var widest = radius >= SC_RADII_KM.length - 1
+  if (!widest && (!lead || lead.used.length < SC_ENOUGH))
+    return result(copy(state, { radius: radius + 1 }), null, "", true)
   if (!lead) {
-    var radius = state.radius || 0
-    if (radius < SC_RADII_KM.length - 1) return result(copy(state, { radius: radius + 1 }), null, "", true)
     return result(copy(state, { radius: radius }), null,
       "No Sensor.Community sensor within " + SC_RADII_KM[SC_RADII_KM.length - 1] + " km", false)
   }
@@ -280,6 +285,14 @@ function plan(id, state, context, now) {
   if (id === "openmeteo") return omPlan(s, c)
   if (id === "gios") return giosPlan(s, c)
   if (id === "inpost") return inpostPlan(s, c)
+  return null
+}
+
+// A refusal that means "not here" rather than "not now": the source moves on
+// instead of retrying the same request with a backoff. Null leaves it an
+// ordinary failure for the runner.
+function reject(id, state, op, http) {
+  if (id === "gios" && op === "gios-data" && http === 400) return giosNextStation(state || {}, true)
   return null
 }
 
@@ -380,6 +393,18 @@ function giosObservation(state) {
   }
 }
 
+// The station tried has nothing to read now: no PM sensor at all, or (`manual`)
+// a PM sensor sampled by hand, whose results GIOŚ publishes weeks later and
+// refuses with HTTP 400 until then. Try the next nearest.
+function giosNextStation(state, manual) {
+  var rest = (state.stations || []).filter(function(s) { return !state.station || s.id !== state.station.id })
+  var after = { stations: rest, station: rest[0] || null }
+  if (!after.station)
+    return result(after, null, manual ? "No GIOŚ station with live PM data within 30 km"
+                                      : "No GIOŚ station with PM measurements within 30 km", false)
+  return result(after, null, "", true)
+}
+
 function giosAccept(state, op, raw, context, now) {
   var data = parseJson(raw)
   if (!data || typeof data !== "object") return unexpected("gios", state)
@@ -404,11 +429,7 @@ function giosAccept(state, op, raw, context, now) {
     }
     if (sensors.pm25 !== undefined || sensors.pm10 !== undefined)
       return result(copy(state, { sensors: sensors }), null, "", true)
-    // No PM at this station: try the next nearest.
-    var rest = state.stations.filter(function(s) { return s.id !== state.station.id })
-    var after = { stations: rest, station: rest[0] || null }
-    if (!after.station) return result(after, null, "No GIOŚ station with PM measurements within 30 km", false)
-    return result(after, null, "", true)
+    return giosNextStation(state, false)
   }
 
   var cycle = (state.cycle || []).slice(1)

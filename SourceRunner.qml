@@ -161,6 +161,17 @@ Item {
         Qt.callLater(runner.step)
         return
       }
+      // Some refusals mean "not here" and send the source on to its next
+      // candidate rather than into a backoff.
+      var rejected = code === 22 ? Sources.reject(runner.sourceId, runner.state, proc.op, Model.httpStatusIn(errors)) : null
+      if (rejected) {
+        runner.state = rejected.state
+        runner.status = rejected.status
+        runner.publish()
+        if (rejected.again) Qt.callLater(runner.step)
+        else runner.schedule()
+        return
+      }
       if (code !== 0 || overflow) {
         runner.failures++
         runner.lastHttp = Model.httpStatusIn(errors)

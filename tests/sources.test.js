@@ -62,7 +62,8 @@ test("Sensor.Community: duplicate rows at one timestamp are averaged, not double
     scEntry(1, 11, 50.0601, 19.9401, "2026-10-19 14:24:00", { P2: 6.2, P1: 11 }),
     scEntry(1, 11, 50.0601, 19.9401, "2026-10-19 14:24:00", { P0: 4, P2: 4.4, P1: 4.6 })
   ])
-  const o = Sources.accept("sensorcommunity", {}, "sc-box", raw, KRAKOW, NOW).observation
+  // At the widest box, where one site is enough to answer.
+  const o = Sources.accept("sensorcommunity", { radius: 2 }, "sc-box", raw, KRAKOW, NOW).observation
   assert.equal(o.count, 1)
   assert.equal(Math.round(o.readings.pm25.value * 10), 53)
 })
@@ -271,4 +272,29 @@ test("historyKey, describe and attribution", () => {
   assert.equal(Sources.describe(om, NOW).title, "Open-Meteo · model, not a measurement")
   assert.equal(Sources.attribution(["gios", "openmeteo"]), "Data: GIOŚ · CAMS / Open-Meteo (CC BY 4.0)")
   assert.equal(Sources.attribution([]), "")
+})
+
+test("GIOŚ: a manual station (HTTP 400 on its data) hands over to the next station", () => {
+  const two = [{ id: 875, name: "Nidzica", distance: 367 }, { id: 400, name: "Next", distance: 9000 }]
+  const midCycle = { stations: two, station: two[0], sensors: { pm10: 5744 }, cycle: ["pm10", "index"], values: {}, level: "" }
+  const r = Sources.reject("gios", midCycle, "gios-data", 400)
+  assert.equal(r.again, true)
+  assert.equal(r.state.station.id, 400)
+  assert.equal(r.state.sensors, undefined, "the next station's sensors are looked up afresh")
+  assert.equal(Sources.plan("gios", r.state, KRAKOW, NOW).op, "gios-sensors")
+  const last = Sources.reject("gios", { stations: [two[0]], station: two[0], sensors: { pm10: 5744 }, cycle: ["pm10"] }, "gios-data", 400)
+  assert.equal(last.again, false)
+  assert.match(last.status, /live PM/)
+  assert.equal(Sources.reject("gios", midCycle, "gios-data", 503), null, "a server error is an ordinary failure")
+  assert.equal(Sources.reject("sensorcommunity", {}, "sc-box", 400), null)
+})
+
+test("Sensor.Community widens the box while fewer than three sites answer", () => {
+  const one = sc([scEntry(1, 11, 50.0601, 19.9401, "2026-10-19 14:24:00", { P2: 10, P1: 16 })])
+  const r = Sources.accept("sensorcommunity", {}, "sc-box", one, KRAKOW, NOW)
+  assert.equal(r.again, true)
+  assert.equal(r.state.radius, 1)
+  assert.equal(r.observation, null)
+  const atMax = Sources.accept("sensorcommunity", { radius: 2 }, "sc-box", one, KRAKOW, NOW)
+  assert.equal(atMax.observation.count, 1, "at the widest box one site is better than none")
 })
