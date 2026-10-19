@@ -511,6 +511,20 @@ function sourceFailure(label, exitCode, stderrText) {
   return who + " is unreachable"
 }
 
+// The panel shows a click at once, as an override, and writes it through the
+// shell. The shell's copy of the config catches up later, and two quick
+// clicks can come back out of order or not at all: the first write landing
+// is not the second one landing. So an override stays until the config holds
+// its own value (the write landed) or something this panel never wrote
+// (someone else changed it); the base it was made over, or any value this
+// panel wrote recently, means its own write is still on the way.
+function keepOverride(override, live, written) {
+  var now = JSON.stringify(live)
+  if (now === JSON.stringify(override.value)) return false
+  if (now === JSON.stringify(override.base)) return true
+  return (written || []).indexOf(now) >= 0
+}
+
 // ------------------------------------------------------------ formatting
 
 function formatDistance(metres) {

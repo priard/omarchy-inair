@@ -3,6 +3,7 @@ import QtQml
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 import "Sources.js" as Sources
@@ -50,11 +51,15 @@ Panel {
 
   // What a click in the panel changed, applied at once and independently of
   // whether the write to shell.json lands. Each override remembers the live
-  // value it was made over: once the config moves — because the write came
-  // back, or because `omarchy bar set` said something else — the config wins
-  // again. Without this, every toggle waited on a round trip through the host,
-  // and when the host had no shell to write through the buttons did nothing.
+  // value it was made over and stays until Model.keepOverride says the
+  // config has caught up or moved on. Without this, every toggle waited on a
+  // round trip through the host, and when the host had no shell to write
+  // through the buttons did nothing.
   property var overrides: ({})
+
+  // The last few values this panel wrote, per key, so a late echo of an
+  // earlier click is recognised as ours rather than as someone else's edit.
+  property var written: ({})
 
   function liveValue(name) {
     return entry ? entry[name] : undefined
@@ -63,19 +68,19 @@ Panel {
   function entryValue(name, fallback) {
     var value = liveValue(name)
     var override = overrides[name]
-    if (override && JSON.stringify(override.base) === JSON.stringify(value)) value = override.value
+    if (override) value = override.value
     return value === undefined || value === null ? fallback : value
   }
 
-  // An override is spent the moment the config moves off the value it was
-  // made over. Dropping it then, rather than merely ignoring it, matters: an
+  // An override is spent once its own write lands or someone else changes
+  // the key. Dropping it then, rather than merely ignoring it, matters: an
   // override kept around would wake up again the next time the config
   // happened to return to that old value, and undo an `omarchy bar set`.
   onEntryChanged: {
     var next = ({})
     var dropped = false
     for (var key in overrides) {
-      if (JSON.stringify(overrides[key].base) === JSON.stringify(liveValue(key))) next[key] = overrides[key]
+      if (Model.keepOverride(overrides[key], liveValue(key), written[key])) next[key] = overrides[key]
       else dropped = true
     }
     if (dropped) overrides = next
@@ -83,8 +88,15 @@ Panel {
 
   function setOverrides(changes) {
     var next = ({})
-    for (var key in overrides) next[key] = overrides[key]
-    for (var change in changes) next[change] = { value: changes[change], base: liveValue(change) }
+    var log = ({})
+    var key
+    for (key in overrides) next[key] = overrides[key]
+    for (key in written) log[key] = written[key]
+    for (var change in changes) {
+      next[change] = { value: changes[change], base: liveValue(change) }
+      log[change] = (log[change] || []).concat([JSON.stringify(changes[change])]).slice(-5)
+    }
+    written = log
     overrides = next
   }
 
@@ -253,11 +265,16 @@ Panel {
   // Every colour the views draw is checked against the panel's real background
   // for the theme in use. A translucent popup is judged against the theme
   // background behind it, which is what it is mostly made of.
-  readonly property color surface: Color.popups.background.a >= 0.5
-    ? Color.popups.background : Color.background
-  readonly property color foreground: Model.readable(Color.popups.text, surface, 7)
-  readonly property color dim: Model.tone(Color.popups.text, surface, 0.32, 4.5)
-  readonly property color faint: Model.tone(Color.popups.text, surface, 0.5, 3)
+  //
+  // Color is always qualified as Commons.Color: unqualified, the name
+  // resolves to something other than the shell's palette in a plugin, every
+  // read came back undefined, and the text fell back to black — invisible on
+  // a dark theme.
+  readonly property color surface: Commons.Color.popups.background.a >= 0.5
+    ? Commons.Color.popups.background : Commons.Color.background
+  readonly property color foreground: Model.readable(Commons.Color.popups.text, surface, 7)
+  readonly property color dim: Model.tone(Commons.Color.popups.text, surface, 0.32, 4.5)
+  readonly property color faint: Model.tone(Commons.Color.popups.text, surface, 0.5, 3)
   // The frame follows the source on screen; the pill follows the primary.
   readonly property color levelInk: ink(levelMeta.color)
 
@@ -514,8 +531,14 @@ Panel {
 
   signal searchFocusRequested()
 
+  // `/` from the readings swaps the skin for the settings page; the page may
+  // not exist yet when the request is made, so it also leaves a note that the
+  // page picks up when it is created.
+  property bool focusSearchPending: false
+
   function openSettings(focusSearch) {
     previewId = ""
+    focusSearchPending = !!focusSearch
     settingsOpen = true
     if (focusSearch) Qt.callLater(function() { root.searchFocusRequested() })
   }

@@ -69,3 +69,16 @@ test("sourceFailure names the source", () => {
   assert.equal(Model.sourceFailure("GIOŚ", 22, "returned error: 429"),
     "GIOŚ is limiting requests (HTTP 429); trying again later")
 })
+
+test("keepOverride: an earlier write of ours landing late does not undo a later click", () => {
+  const A = ["sensorcommunity", "gios"]
+  const B = ["sensorcommunity", "gios", "inpost"]
+  const C = ["sensorcommunity", "inpost", "gios"]
+  const override = { value: C, base: A }
+  const written = [JSON.stringify(B), JSON.stringify(C)]
+  assert.equal(Model.keepOverride(override, A, written), true, "nothing landed yet")
+  assert.equal(Model.keepOverride(override, B, written), true, "our earlier write landed; ours is still in flight")
+  assert.equal(Model.keepOverride(override, C, written), false, "ours landed: the config speaks for itself")
+  assert.equal(Model.keepOverride(override, ["gios"], written), false, "someone else changed it")
+  assert.equal(Model.keepOverride({ value: "plain", base: undefined }, undefined, [JSON.stringify("plain")]), true)
+})
