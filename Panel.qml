@@ -1,19 +1,23 @@
 import QtQuick
+import QtQml
 import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
+import "Sources.js" as Sources
 
-// All of the plugin's state lives here: which locker is being read, what it
-// last reported, and which other sensors are in range. The bar widget above
-// renders `label`, `levelColor` and `tooltip` and nothing else.
+// All of the plugin's state lives here: where the user is, which sources are
+// enabled and in what order, what each one last reported, and which one the
+// pill shows. The bar widget above renders `label`, `levelColor` and
+// `tooltip` and nothing else.
 //
-// Nothing is fetched directly. Every request goes through bin/inair-fetch,
-// which caps the response at the producer and runs under a deadline in its own
-// session, and the location comes from bin/inair-location, which reads
-// Omarchy's own weather.json through a single validated descriptor. This file
-// never touches a file path and never builds a shell string.
+// Nothing is fetched directly. Each source runs in its own SourceRunner on
+// bin/inair-fetch, which caps every response at the producer and runs under a
+// deadline in its own session; the weather location comes from
+// bin/inair-location, which reads Omarchy's own weather.json through a single
+// validated descriptor. This file never touches a file path and never builds
+// a shell string or a URL.
 Panel {
   id: root
   moduleName: "priard.inair"
@@ -84,8 +88,7 @@ Panel {
     overrides = next
   }
 
-  // A pinned code holds one locker forever; empty means "whichever sensor is
-  // nearest to the location Omarchy already knows".
+  // A pinned code holds one InPost locker; empty means the nearest one.
   readonly property string pinnedCode: Model.plain(entryValue("locker", ""), 32)
   readonly property string scale:
     String(entryValue("index", "polish")) === "european" ? "european" : "polish"
@@ -98,68 +101,151 @@ Panel {
   readonly property int refreshMinutes:
     Math.max(1, Math.min(60, Math.round(Model.finiteOr(entryValue("refreshMinutes", 5), 5))))
 
-  // The numeric id costs one page fetch to discover and never changes, so it
-  // is remembered in shell.json and the next session starts straight at the
-  // readings.
-  readonly property string cachedCode: Model.plain(entryValue("resolvedCode", ""), 32)
-  readonly property string cachedId: Model.plain(entryValue("resolvedId", ""), 12)
+  // Which sources, in which order, and whether the wizard has been through.
+  readonly property var sourceSettings: Sources.settingsFrom({
+    sources: entryValue("sources", null),
+    setupDone: entryValue("setupDone", false),
+    locker: entryValue("locker", ""),
+    resolvedCode: entryValue("resolvedCode", "")
+  })
+  readonly property var sources: sourceSettings.sources
+  readonly property bool setupDone: sourceSettings.setupDone
 
-  // The pin the current resolution was started for. It keeps an external edit,
-  // a click in the list and this plugin's own write from each starting the same
-  // work three times.
-  property string appliedPin: ""
+  // inAir's own place wins; the Weather widget's coordinates are the fallback.
+  readonly property var storedPlace: Sources.placeFrom(entryValue("place", null))
+  property var weatherPlace: null
+  readonly property var place: storedPlace || weatherPlace
 
-  onPinnedCodeChanged: Qt.callLater(syncToPin)
+  // Nothing is fetched until there is somewhere to read and something to
+  // read it from. A pinned InPost locker is somewhere on its own.
+  readonly property bool canRead: sources.length > 0
+    && (place !== null || (sources.indexOf("inpost") >= 0 && pinnedCode !== ""))
+  readonly property bool setupNeeded: !setupDone || !canRead
+
+  readonly property var context: ({ place: place, locker: pinnedCode })
+  readonly property string contextKey: JSON.stringify(context)
 
   // ---------------------------------------------------------------- state
 
-  property var location: null          // { latitude, longitude, name }
-  property var candidates: []          // nearby lockers that carry a sensor
-  property var locker: null            // the one being read
-  property string lockerCode: ""
-  property string lockerId: ""
-  property var air: null               // last successful reading, kept on failure
-  property string statusText: ""
-  property bool discovering: false
-  property int resolveIndex: 0
-  property double candidatesFetchedAt: 0
-
-  // A locker typed in by hand is not in the nearby list — it may be in another
-  // town entirely — so its details are fetched on their own and kept here.
-  property var manualPoint: null
+  property var observations: ({})
+  property var states: ({})
+  property var statuses: ({})
+  property string previewId: ""
+  property bool settingsOpen: false
   property bool searching: false
+  property var placeResults: []
+  property string placeStatus: ""
+  property string panelStatus: ""
 
-  // What the sensor list was last found around, when it came from the search
-  // box rather than from the stored location: a postcode, or the code of a
-  // locker typed in. Shown in the list's heading so the distances say what
-  // they are measured from.
-  property string searchOrigin: ""
+  // Ticks so freshness and "3 min ago" move on without a new reading.
+  property double clock: Date.now()
 
-  readonly property bool busy: locationProc.running || nearbyProc.running
-    || idProc.running || airProc.running || pointProc.running || postcodeProc.running || aroundProc.running
+  Timer {
+    interval: 30000
+    repeat: true
+    running: true
+    onTriggered: root.clock = Date.now()
+  }
 
-  readonly property string levelKey: Model.effectiveLevel(air, scale)
-  readonly property var levelMeta: Model.levelInfo(levelKey, scale)
-  readonly property color levelColor: levelMeta.color
+  readonly property bool showingSetup: setupNeeded || settingsOpen
 
-  // The pill is always there, reading or not. It used to hide until the first
-  // reading arrived, and on a machine with no coordinates stored the first
-  // reading never came: the plugin looked uninstalled, and the panel that says
-  // what is missing could not be opened. A dash says "no number yet" instead.
-  readonly property bool hasReading: Model.pillText(air) !== ""
-  readonly property string label: hasReading ? "󰵃 " + Model.pillText(air) : "󰵃 —"
+  readonly property string primaryId: Sources.primary(sources, observations, clock)
+  readonly property string shownId: previewId !== "" && sources.indexOf(previewId) >= 0 ? previewId : primaryId
+  readonly property var air: shownId !== "" ? (observations[shownId] || null) : null
+  readonly property var primaryObservation: primaryId !== "" ? (observations[primaryId] || null) : null
+  readonly property bool indexOnly: air !== null && air.kind === "index" && Model.value(air.readings, "pm25") === null
 
+  readonly property bool busy: {
+    for (var i = 0; i < runners.count; i++) {
+      var r = runners.objectAt(i)
+      if (r && r.busy) return true
+    }
+    return locationProc.running || geocodeProc.running || postcodeProc.running
+  }
+
+  // InPost publishes a verdict but no numbers, so it is always read on the
+  // Polish scale; everything else follows the scale the user picked.
+  function scaleFor(observation) {
+    return observation && observation.kind === "index" ? "polish" : scale
+  }
+
+  readonly property string levelScale: scaleFor(air)
+  readonly property string levelKey: Model.effectiveLevel(air, levelScale)
+  readonly property var levelMeta: Model.levelInfo(levelKey, levelScale)
+
+  // The pill follows the primary source even while the panel previews another.
+  readonly property color levelColor: Model.levelInfo(
+    Model.effectiveLevel(primaryObservation, scaleFor(primaryObservation)), scaleFor(primaryObservation)).color
+
+  // The pill is always there, reading or not: a gear before setup, a dash
+  // while nothing has answered, so the panel that says what is missing can
+  // always be opened.
+  readonly property bool hasReading: !setupNeeded && primaryObservation !== null
+    && (Model.pillText(primaryObservation) !== "" || primaryObservation.level !== "")
+  readonly property string label: Model.pillLabel(setupNeeded ? null : primaryObservation, setupNeeded)
+
+  readonly property var shownDescription: Sources.describe(air, clock)
+  readonly property string sourceTitle: air ? shownDescription.title
+    : (shownId !== "" ? Sources.info(shownId).label : (sources.length ? Sources.info(sources[0]).label : ""))
+  readonly property string sourceDetail: air ? shownDescription.detail : (busy ? "looking…" : "no data yet")
+
+  readonly property string attributionText: Sources.attribution(sources)
+
+  readonly property string statusText: {
+    if (panelStatus !== "") return panelStatus
+    if (shownId !== "" && statuses[shownId]) return statuses[shownId]
+    if (air) return ""
+    for (var i = 0; i < sources.length; i++) if (statuses[sources[i]]) return statuses[sources[i]]
+    return ""
+  }
+
+  // Built from sensor numbers and names this plugin has already stripped of
+  // markup and capped: the bar renders tooltips with a format this plugin
+  // cannot pin to PlainText.
   readonly property string tooltip: {
-    if (!air) return statusText !== "" ? Model.plain(statusText, 160) : "inAir — click to set up"
-    var head = lockerCode
-    if (locker && locker.distance !== null) head += " · " + Model.formatDistance(locker.distance)
-    var pm25 = Model.value(air.readings, "pm25")
-    var pm10 = Model.value(air.readings, "pm10")
-    var line = levelMeta.label
+    if (setupNeeded) return "inAir — click to set up"
+    var o = primaryObservation
+    if (!o) return statusText !== "" ? Model.plain(statusText, 160) : "inAir — no data yet"
+    var d = Sources.describe(o, clock)
+    var line = Model.levelInfo(Model.effectiveLevel(o, scaleFor(o)), scaleFor(o)).label
+    var pm25 = Model.value(o.readings, "pm25")
+    var pm10 = Model.value(o.readings, "pm10")
     if (pm25 !== null) line += " · PM2.5 " + Model.formatValue(pm25)
     if (pm10 !== null) line += " · PM10 " + Model.formatValue(pm10)
-    return Model.plain(head + "\n" + line, 160)
+    return Model.plain(d.title + " · " + d.detail + "\n" + line, 160)
   }
+
+  // One row per enabled source, in priority order, for the panel's cards.
+  readonly property var cards: {
+    var out = []
+    for (var i = 0; i < sources.length; i++) {
+      var id = sources[i]
+      var o = observations[id] || null
+      var s = scaleFor(o)
+      out.push({
+        id: id,
+        index: i,
+        label: Sources.info(id).label,
+        level: Model.effectiveLevel(o, s),
+        scale: s,
+        pm25: o ? Model.value(o.readings, "pm25") : null,
+        pm10: o ? Model.value(o.readings, "pm10") : null,
+        distance: o ? o.distance : null,
+        at: o ? o.at : 0,
+        fresh: Sources.isFresh(o, clock),
+        status: statuses[id] || "",
+        shown: id === shownId,
+        primary: id === primaryId
+      })
+    }
+    return out
+  }
+
+  // The InPost lockers around, when InPost is what the panel shows.
+  readonly property var candidates: shownId === "inpost" && states.inpost && states.inpost.candidates
+    ? states.inpost.candidates : []
+  readonly property string lockerCode: shownId === "inpost" && states.inpost ? (states.inpost.code || "") : ""
+  readonly property var members: air && air.members ? air.members : []
 
   readonly property string fontFamily: root.bar && root.bar.fontFamily
     ? root.bar.fontFamily : Style.font.family
@@ -172,10 +258,11 @@ Panel {
   readonly property color foreground: Model.readable(Color.popups.text, surface, 7)
   readonly property color dim: Model.tone(Color.popups.text, surface, 0.32, 4.5)
   readonly property color faint: Model.tone(Color.popups.text, surface, 0.5, 3)
-  readonly property color levelInk: ink(levelColor)
+  // The frame follows the source on screen; the pill follows the primary.
+  readonly property color levelInk: ink(levelMeta.color)
 
   // A colour that has to carry meaning on this background: the index bands,
-  // the per-locker dots, the temperature gauge.
+  // the per-source dots, the temperature gauge.
   function ink(color) {
     return Model.readable(color, surface, 3)
   }
@@ -186,25 +273,27 @@ Panel {
 
   // ------------------------------------------------------------- history
 
-  // The readings of the last 24 hours for the locker being read, oldest
-  // first, for the sparkline, the plain skin's chart and the trend arrows.
-  // Kept across shell restarts in one private file (bin/inair-history,
-  // ~/.local/state/priard.inair/history.json), which holds the few lockers
-  // used most recently: a look at another locker starts that locker's own
-  // trend and leaves this one's in the file for when you come back. A trend
-  // never spans two streets.
+  // The readings of the last 24 hours of the primary source, for the
+  // sparkline, the plain skin's chart and the trend arrows. Kept across shell
+  // restarts by bin/inair-history (~/.local/state/priard.inair/history.json),
+  // keyed by source and place, so a trend never mixes two streets or two
+  // sources.
   property var history: []
   readonly property int historyLimit: 320
   readonly property double historyWindow: 24 * 3600 * 1000
+  readonly property string historyKey: primaryId === "" ? ""
+    : Sources.historyKey(primaryId, states[primaryId] || ({}), context)
+  readonly property var shownHistory: shownId === primaryId ? history : []
 
-  // Which locker the stored history has been looked up for, so it is read
-  // once per locker and not on every refresh.
+  // Which key the stored history has been looked up for, so it is read once
+  // per key and not on every refresh.
   property string historyLoadedFor: ""
   property bool historyWritePending: false
 
-  function remember(parsed) {
-    var r = parsed.readings
-    var at = parsed.at.getTime()
+  function remember(observation) {
+    if (historyKey === "") return
+    var r = observation.readings
+    var at = observation.at
     // Opening the panel also refreshes, so readings can arrive seconds apart;
     // a sample younger than a minute is replaced rather than added, which keeps
     // the sparkline a picture of time and not of how often the panel opened.
@@ -231,14 +320,14 @@ Panel {
 
   function series(field) {
     var out = []
-    for (var i = 0; i < history.length; i++) out.push(history[i][field])
+    for (var i = 0; i < shownHistory.length; i++) out.push(shownHistory[i][field])
     return out
   }
 
   function loadHistory() {
-    if (lockerCode === "" || historyLoadedFor === lockerCode || historyReadProc.running) return
+    if (historyKey === "" || historyLoadedFor === historyKey || historyReadProc.running) return
     historyReadProc.buffer = ""
-    historyReadProc.code = lockerCode
+    historyReadProc.code = historyKey
     historyReadProc.running = true
   }
 
@@ -253,7 +342,7 @@ Panel {
     } catch (e) {
       doc = null
     }
-    if (!doc || doc.code !== code || code !== lockerCode || !Array.isArray(doc.samples)) {
+    if (!doc || doc.code !== code || code !== historyKey || !Array.isArray(doc.samples)) {
       if (historyWritePending) saveHistory()
       return
     }
@@ -275,19 +364,23 @@ Panel {
   // One write at a time; a sample that arrives while one is in flight is
   // written right after it, carrying everything up to then.
   function saveHistory() {
-    if (lockerCode === "" || history.length === 0) return
+    if (historyKey === "" || history.length === 0) return
     // Until the stored trend has been read back, a write would replace it with
     // just this session's samples; wait for the read, which retries this.
-    if (historyLoadedFor !== lockerCode || historyWriteProc.running) {
+    if (historyLoadedFor !== historyKey || historyWriteProc.running) {
       historyWritePending = true
       return
     }
     historyWritePending = false
-    historyWriteProc.payload = JSON.stringify({ code: lockerCode, samples: history })
+    historyWriteProc.payload = JSON.stringify({ code: historyKey, samples: history })
     historyWriteProc.running = true
   }
 
-  onLockerCodeChanged: Qt.callLater(loadHistory)
+  onHistoryKeyChanged: {
+    history = []
+    historyLoadedFor = ""
+    Qt.callLater(loadHistory)
+  }
 
   // ------------------------------------------------------ panel lifecycle
 
@@ -309,7 +402,8 @@ Panel {
 
   function close() {
     setCenterHoverRevealSuppressed(false)
-    root.stopSearching()
+    root.closeSettings()
+    root.previewId = ""
     root.controller.hide()
   }
 
@@ -336,7 +430,7 @@ Panel {
   // updateEntryInline replaces the whole entry, so a write carries every key
   // forward. Read the entry back out of the live config rather than trusting
   // the injected copy: merging into an empty object would quietly drop the
-  // user's pinned locker.
+  // user's settings.
   function shellConfig() {
     var shell = bar ? bar.shell : null
     if (!shell) return null
@@ -371,231 +465,106 @@ Panel {
     bar.shell.updateEntryInline(moduleName, next)
   }
 
-  // ------------------------------------------------------------- actions
+  // ------------------------------------------------------------- sources
 
+  function adopt(id, state, observation, status) {
+    var previous = observations[id] || null
+    var s = Sources.copy(states, null)
+    s[id] = state
+    states = s
+    var t = Sources.copy(statuses, null)
+    t[id] = status
+    statuses = t
+    var o = Sources.copy(observations, null)
+    if (observation) o[id] = observation
+    else delete o[id]
+    observations = o
+    if (observation && observation !== previous && id === primaryId) remember(observation)
+  }
+
+  // Opening the panel or a middle click: re-read the weather location (a
+  // local file) and let any source with nothing recent ask again.
   function refresh() {
-    if (lockerId !== "" && lockerCode !== "") startAir()
-    if (candidates.length === 0 || staleCandidates()) beginDiscovery()
+    readWeather()
+    for (var i = 0; i < runners.count; i++) {
+      var r = runners.objectAt(i)
+      if (r) r.refreshIfStale()
+    }
   }
 
-  // The refresh button asks for everything again, including the locker list,
-  // which the periodic refresh deliberately does not.
+  // The refresh button: every source, now, backoff forgotten.
   function refreshEverything() {
-    candidatesFetchedAt = 0
-    statusText = ""
-    if (lockerId !== "") startAir()
-    beginDiscovery()
-  }
-
-  function staleCandidates() {
-    // Lockers do not move, but the user does; an hour is often enough to
-    // notice a new town without asking InPost about it on every panel open.
-    return candidatesFetchedAt > 0 && (Date.now() - candidatesFetchedAt) > 3600000
-  }
-
-  function beginDiscovery() {
-    if (discovering) return
-    discovering = true
-    locationProc.buffer = ""
-    locationProc.running = true
-  }
-
-  function afterLocation() {
-    if (!location || location.latitude === null || location.longitude === null) {
-      discovering = false
-      // Omarchy keeps no coordinates until someone sets them: by default the
-      // weather follows the IP address, and a location set by name alone has
-      // no latitude or longitude. A locker already being read — found earlier
-      // from a postcode, or cached — keeps working without one; only its
-      // address has to be fetched, since no search brought it this time.
-      if (lockerId !== "") {
-        lookupDetails()
-        return
-      }
-      // A pinned locker needs no location either: go straight to it.
-      if (pinnedCode !== "") {
-        if (!pointProc.running) lookupCode(pinnedCode)
-        return
-      }
-      statusText = "No location to search from. Press / and type your postcode"
-        + " (e.g. 31-042) or a locker code, or set your location in the"
-        + " Weather widget and pick it from the suggestions."
-      return
+    panelStatus = ""
+    readWeather()
+    for (var i = 0; i < runners.count; i++) {
+      var r = runners.objectAt(i)
+      if (r) r.refresh()
     }
-    nearbyProc.buffer = ""
-    nearbyProc.running = true
   }
 
-  // The list the resolver walks: a pinned locker on its own, otherwise every
-  // sensor in range, nearest first.
-  function resolutionList() {
-    if (pinnedCode !== "") {
-      if (manualPoint && manualPoint.code === pinnedCode) return [manualPoint]
-      for (var i = 0; i < candidates.length; i++)
-        if (candidates[i].code === pinnedCode) return [candidates[i]]
-      return []
-    }
-    return candidates
+  function previewSource(id) {
+    previewId = previewId === id || id === primaryId ? "" : id
   }
 
-  // Not every locker with a sensor has a public page: some slugs 302 away to
-  // the locker finder, and without the page there is no numeric id and so no
-  // readings. Walk the nearest few until one resolves rather than reporting
-  // failure for a sensor two streets further on.
-  function resolveFrom(index) {
-    var list = resolutionList()
-    var attempts = Math.min(list.length, 6)
-    if (index >= attempts) {
-      discovering = false
-      if (list.length === 0 && pinnedCode !== "") {
-        // The pin names a locker that is not in range and has not been looked
-        // up yet; ask InPost about that one code directly.
-        lookupCode(pinnedCode)
-        return
-      }
-      statusText = list.length === 0
-        ? "No air sensor within reach"
-        : "No locker nearby exposes its sensor id"
-      return
-    }
-
-    resolveIndex = index
-    var point = list[index]
-    var slug = Model.lockerPageSlug(point)
-    if (slug === "") {
-      resolveFrom(index + 1)
-      return
-    }
-
-    idProc.buffer = ""
-    idProc.slug = slug
-    idProc.running = true
+  function previewIndex(n) {
+    if (n >= 1 && n <= sources.length) previewSource(sources[n - 1])
   }
 
-  function adoptLocker(point, id) {
-    locker = point
-    lockerCode = point.code
-    lockerId = id
-    discovering = false
-    statusText = ""
-    persist({ resolvedCode: point.code, resolvedId: id })
-    startAir()
+  // ------------------------------------------------------------ settings
+
+  signal searchFocusRequested()
+
+  function openSettings(focusSearch) {
+    previewId = ""
+    settingsOpen = true
+    if (focusSearch) Qt.callLater(function() { root.searchFocusRequested() })
   }
 
-  function startAir() {
-    if (lockerId === "" || lockerCode === "") return
-    if (airProc.running) return
-    airProc.buffer = ""
-    airProc.running = true
+  function closeSettings() {
+    if (searching) endSearch()
+    placeResults = []
+    placeStatus = ""
+    settingsOpen = false
+  }
+
+  function persistSources(list) {
+    persist({ sources: Sources.normalizeSources(list) })
+  }
+
+  function toggleSource(id) {
+    var list = sources.slice()
+    var at = list.indexOf(id)
+    if (at >= 0) list.splice(at, 1)
+    else list.push(id)
+    persistSources(list)
+  }
+
+  function moveSource(id, delta) {
+    var list = sources.slice()
+    var at = list.indexOf(id)
+    var to = at + delta
+    if (at < 0 || to < 0 || to >= list.length) return
+    list.splice(at, 1)
+    list.splice(to, 0, id)
+    persistSources(list)
+  }
+
+  function setPlace(place) {
+    var clean = Sources.placeFrom(place)
+    if (!clean) return
+    persist({ place: { name: clean.name, latitude: clean.latitude, longitude: clean.longitude } })
+    placeResults = []
+    placeStatus = ""
+  }
+
+  function useWeatherPlace() {
+    persist({ place: null })
+    placeResults = []
+    placeStatus = ""
   }
 
   function pinLocker(code) {
-    var next = Model.plain(code, 32)
-    if (next === pinnedCode && next !== "") return
-
-    // Write first, then start the work. The write comes back as a settings
-    // change, which calls syncToPin again; the appliedPin guard makes the
-    // second call a no-op instead of a second round of fetches.
-    persist({ locker: next, resolvedCode: "", resolvedId: "" })
-    appliedPin = next
-    restartResolution(next)
-  }
-
-  // Everything that makes the plugin start over on a different locker, whether
-  // the pin came from a click here or from an edit somewhere else.
-  function restartResolution(pin) {
-    air = null
-    history = []
-    historyLoadedFor = ""
-    locker = null
-    manualPoint = null
-    lockerCode = ""
-    lockerId = ""
-    statusText = ""
-    discovering = false
-    if (pin !== "" && !inCandidates(pin)) lookupCode(pin)
-    else if (candidates.length > 0) resolveFrom(0)
-    else beginDiscovery()
-  }
-
-  function syncToPin() {
-    if (pinnedCode === appliedPin) return
-    // Already reading exactly what the pin now names — nothing to redo.
-    if (pinnedCode !== "" && pinnedCode === lockerCode && lockerId !== "") {
-      appliedPin = pinnedCode
-      return
-    }
-    appliedPin = pinnedCode
-    restartResolution(pinnedCode)
-  }
-
-  function inCandidates(code) {
-    for (var i = 0; i < candidates.length; i++)
-      if (candidates[i].code === code) return true
-    return false
-  }
-
-  // ------------------------------------------------------- manual entry
-
-  // A code typed by hand is held to exactly the alphabet the fetch helper
-  // accepts, and uppercased because that is how InPost prints them on the
-  // locker. Anything else is refused here rather than sent anywhere.
-  function normalizeCode(text) {
-    var code = String(text || "").replace(/^\s+|\s+$/g, "").toUpperCase()
-    return /^[A-Z0-9_-]{1,32}$/.test(code) ? code : ""
-  }
-
-  // The search box takes two things. A postcode lists the sensors around it,
-  // nearest first, without storing anything; a locker code pins that locker.
-  function submitCode(text) {
-    var postcode = Model.normalizePostcode(text)
-    if (postcode !== "") {
-      stopSearching()
-      findNear(postcode)
-      return
-    }
-    var code = normalizeCode(text)
-    if (code === "") {
-      statusText = "Type a postcode like 31-042, or a locker code like KRA80M"
-      return
-    }
-    stopSearching()
-    pinLocker(code)
-  }
-
-  function findAround(point) {
-    if (aroundProc.running) return
-    aroundProc.buffer = ""
-    aroundProc.origin = point.code
-    aroundProc.latitude = Number(point.latitude).toFixed(6)
-    aroundProc.longitude = Number(point.longitude).toFixed(6)
-    aroundProc.running = true
-  }
-
-  function findNear(postcode) {
-    if (postcodeProc.running) return
-    statusText = ""
-    postcodeProc.buffer = ""
-    postcodeProc.postcode = postcode
-    postcodeProc.running = true
-  }
-
-  function lookupCode(code) {
-    pointProc.buffer = ""
-    pointProc.code = code
-    pointProc.running = true
-  }
-
-  // The flag only says whether the code field is open; each skin owns its own
-  // field and watches this to take or drop the keyboard focus. That keeps the
-  // panel from reaching into whichever view happens to be loaded.
-  function startSearching() {
-    statusText = ""
-    searching = true
-  }
-
-  function stopSearching() {
-    searching = false
+    persist({ locker: Model.plain(code, 32) })
   }
 
   function cycleScale() {
@@ -606,50 +575,84 @@ Panel {
     persist({ style: style === "terminal" ? "plain" : "terminal" })
   }
 
-  // The cached locker is trusted only while it still matches the pin; changing
-  // the pin invalidates it, and so does clearing one.
-  function adoptCache() {
-    if (cachedCode === "" || cachedId === "") return false
-    if (pinnedCode !== "" && pinnedCode !== cachedCode) return false
-    lockerCode = cachedCode
-    lockerId = cachedId
-    return true
+  readonly property var refreshChoices: [1, 5, 10, 15, 30, 60]
+
+  function cycleRefresh() {
+    var at = refreshChoices.indexOf(refreshMinutes)
+    persist({ refreshMinutes: refreshChoices[(at + 1) % refreshChoices.length] })
   }
 
-  // The address of the locker being read, when no search has supplied it.
-  function lookupDetails() {
-    if (locker || lockerCode === "" || pointProc.running) return
-    lookupCode(lockerCode)
+  function finishSetup() {
+    if (!canRead) return
+    persist({ setupDone: true, sources: sources.slice() })
+    closeSettings()
   }
 
-  // The cached locker is in the settings, and at start-up the settings can
-  // arrive after this panel has completed. Adopting the cache only in
-  // onCompleted missed it then; with a location it did not matter, because
-  // discovery found the locker again, but without one the reading was simply
-  // gone after a restart. So the cache is also taken the moment it appears.
-  onCachedIdChanged: Qt.callLater(adoptLateCache)
-
-  function adoptLateCache() {
-    if (lockerId !== "" || !adoptCache()) return
-    statusText = ""
-    startAir()
-    if (!location || location.latitude === null || location.longitude === null) lookupDetails()
+  // The search field takes three things: a postcode (ShipX finds the nearest
+  // parcel point to it), a locker code (pins that locker, when InPost is
+  // on), or a place name (Open-Meteo's geocoder). Only the place chosen from
+  // the results is stored; the typed text is not.
+  function searchPlaces(text) {
+    var typed = String(text || "").replace(/^\s+|\s+$/g, "")
+    placeStatus = ""
+    placeResults = []
+    if (typed === "") return
+    var postcode = Model.normalizePostcode(typed)
+    if (postcode !== "") {
+      postcodeProc.postcode = postcode
+      postcodeProc.buffer = ""
+      postcodeProc.running = true
+      return
+    }
+    if (Sources.looksLikeLockerCode(typed)) {
+      if (sources.indexOf("inpost") < 0) {
+        placeStatus = "That looks like a locker code; switch InPost on to pin a locker."
+        return
+      }
+      pinLocker(typed.toUpperCase())
+      placeStatus = "Pinned InPost locker " + typed.toUpperCase()
+      return
+    }
+    if (typed.length > 64) {
+      placeStatus = "That is too long for a place name"
+      return
+    }
+    geocodeProc.query = typed
+    geocodeProc.buffer = ""
+    geocodeProc.running = true
   }
 
-  Component.onCompleted: {
-    appliedPin = pinnedCode
-    if (adoptCache()) startAir()
-    beginDiscovery()
+  function endSearch() {
+    searching = false
+    keyCatcher.forceActiveFocus()
   }
+
+  // ------------------------------------------------------------ location
+
+  function readWeather() {
+    if (locationProc.running) return
+    locationProc.buffer = ""
+    locationProc.running = true
+  }
+
+  // Omarchy keeps no coordinates until someone picks a place in the Weather
+  // widget: by default the weather follows the IP address. Then there is no
+  // fallback, and the wizard asks for a place instead.
+  function adoptWeather(parsed) {
+    var next = parsed ? Sources.placeFrom({
+      name: Model.plain(parsed.name, 48),
+      latitude: Model.finiteOr(parsed.latitude, null),
+      longitude: Model.finiteOr(parsed.longitude, null)
+    }) : null
+    if (JSON.stringify(next) !== JSON.stringify(weatherPlace)) weatherPlace = next
+  }
+
+  Component.onCompleted: readWeather()
 
   Component.onDestruction: {
     locationProc.signal(15)
-    nearbyProc.signal(15)
-    idProc.signal(15)
-    airProc.signal(15)
-    pointProc.signal(15)
+    geocodeProc.signal(15)
     postcodeProc.signal(15)
-    aroundProc.signal(15)
     historyReadProc.signal(15)
   }
 
@@ -670,9 +673,32 @@ Panel {
   readonly property string historyHelper: pluginFile("bin/inair-history")
   readonly property var helperEnvironment: ({ "PATH": "/usr/bin:/bin", "LC_ALL": "C" })
 
-  function noteFailure(proc, message) {
-    discovering = false
-    if (String(message).length > 0) statusText = Model.plain(message, 120)
+  // Which runners exist, as a string. Canonical order, not priority order, so
+  // reordering sources does not tear every runner down; and a string, because
+  // a string property only signals a change when its value changes. An array
+  // binding would hand the Instantiator a new model, and so new runners and a
+  // fresh round of requests, on every unrelated settings write.
+  readonly property string runnerKey: setupNeeded ? ""
+    : Sources.ORDER.filter(function(id) { return root.sources.indexOf(id) >= 0 }).join(",")
+
+  Instantiator {
+    id: runners
+    model: root.runnerKey === "" ? [] : root.runnerKey.split(",")
+
+    delegate: SourceRunner {
+      required property string modelData
+      sourceId: modelData
+      context: root.context
+      contextKey: root.contextKey
+      refreshMinutes: root.refreshMinutes
+      fetchHelper: root.fetchHelper
+      environment: root.helperEnvironment
+      onReported: function(id, state, observation, status) { root.adopt(id, state, observation, status) }
+    }
+
+    onObjectRemoved: function(index, object) {
+      root.adopt(object.sourceId, ({}), null, "")
+    }
   }
 
   Process {
@@ -694,45 +720,35 @@ Panel {
         }
       }
     }
-    stderr: SplitParser {
-      splitMarker: ""
-      onRead: function(chunk) { root.noteFailure(locationProc, chunk) }
-    }
+    stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
 
     onExited: function(code, status) {
-      if (code !== 0) {
-        root.discovering = false
-        return
-      }
       var parsed = null
-      try {
-        parsed = JSON.parse(locationProc.buffer || "{}")
-      } catch (e) {
-        parsed = null
+      if (code === 0) {
+        try {
+          parsed = JSON.parse(locationProc.buffer || "{}")
+        } catch (e) {
+          parsed = null
+        }
       }
       locationProc.buffer = ""
-      root.location = parsed ? ({
-        latitude: Model.finiteOr(parsed.latitude, null),
-        longitude: Model.finiteOr(parsed.longitude, null),
-        name: Model.plain(parsed.name, 48)
-      }) : null
-      root.afterLocation()
+      root.adoptWeather(parsed)
     }
   }
 
+  // A place name typed into the search field, to Open-Meteo's geocoder.
   Process {
-    id: nearbyProc
+    id: geocodeProc
     property string buffer: ""
-    // The helper already refuses anything larger; this is the consumer's own
-    // ceiling, so a helper that ever grew its cap cannot grow the shell's heap.
-    readonly property int maxBytes: 600000
+    property string query: ""
+    readonly property int maxBytes: 70000
 
-    command: ["/usr/bin/bash", root.fetchHelper, "nearby"]
-    // What to fetch goes on stdin, not in argv: a coordinate, postcode or
-    // locker code says where somebody lives, and argv is public in /proc.
+    command: ["/usr/bin/bash", root.fetchHelper, "geocode"]
+    // What to fetch goes on stdin, not in argv: a place name says where
+    // somebody lives, and argv is public in /proc.
     stdinEnabled: true
     onStarted: {
-      write(root.location ? Number(root.location.latitude).toFixed(6) + " " + Number(root.location.longitude).toFixed(6) : "0 0" + "\n")
+      write(geocodeProc.query + "\n")
       stdinEnabled = false
     }
     clearEnvironment: true
@@ -741,53 +757,27 @@ Panel {
     stdout: SplitParser {
       splitMarker: ""
       onRead: function(chunk) {
-        nearbyProc.buffer += chunk
-        if (nearbyProc.buffer.length > nearbyProc.maxBytes) {
-          nearbyProc.buffer = ""
-          nearbyProc.signal(15)
-          root.noteFailure(nearbyProc, "Locker list exceeded its size limit")
+        geocodeProc.buffer += chunk
+        if (geocodeProc.buffer.length > geocodeProc.maxBytes) {
+          geocodeProc.buffer = ""
+          geocodeProc.signal(15)
         }
       }
     }
     stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
 
     onExited: function(code, status) {
-      nearbyProc.stdinEnabled = true
-      if (code !== 0) {
-        root.discovering = false
-        nearbyProc.buffer = ""
-        if (root.statusText === "") root.statusText = "Could not reach InPost"
-        return
-      }
-      root.candidates = Model.parseNearby(nearbyProc.buffer)
-      root.searchOrigin = ""
-      nearbyProc.buffer = ""
-      root.candidatesFetchedAt = Date.now()
-
-      // A cached locker that is still the nearest needs no page fetch; adopt
-      // its address for the panel and leave the readings alone.
-      if (root.lockerId !== "") {
-        for (var i = 0; i < root.candidates.length; i++) {
-          if (root.candidates[i].code === root.lockerCode) {
-            root.locker = root.candidates[i]
-            root.discovering = false
-            return
-          }
-        }
-        if (root.locker) {
-          root.discovering = false
-          return
-        }
-      }
-      root.resolveFrom(0)
+      geocodeProc.stdinEnabled = true
+      var found = code === 0 ? Sources.parsePlaces(geocodeProc.buffer) : []
+      geocodeProc.buffer = ""
+      root.placeResults = found
+      root.placeStatus = code !== 0 ? "Could not reach the geocoder"
+        : (found.length === 0 ? "No place called " + Model.plain(geocodeProc.query, 48) : "")
     }
   }
 
-  // Sensors around a postcode typed into the search box. The list replaces
-  // the one in the panel; when nothing is being read yet — no location, no
-  // pin — the nearest sensor that answers is adopted too, so a postcode is
-  // all it takes to get a reading. Its id is cached like any other, and the
-  // locker keeps being read after a restart.
+  // A postcode typed into the search field, to ShipX: the nearest parcel
+  // point stands in for the middle of the postcode area.
   Process {
     id: postcodeProc
     property string buffer: ""
@@ -795,8 +785,6 @@ Panel {
     readonly property int maxBytes: 600000
 
     command: ["/usr/bin/bash", root.fetchHelper, "postcode"]
-    // What to fetch goes on stdin, not in argv: a coordinate, postcode or
-    // locker code says where somebody lives, and argv is public in /proc.
     stdinEnabled: true
     onStarted: {
       write(postcodeProc.postcode + "\n")
@@ -819,253 +807,20 @@ Panel {
 
     onExited: function(code, status) {
       postcodeProc.stdinEnabled = true
-      var raw = postcodeProc.buffer
+      var found = code === 0 ? Sources.placeFromPostcode(postcodeProc.buffer, postcodeProc.postcode) : null
       postcodeProc.buffer = ""
       // curl exits 22 on an HTTP error, which is how ShipX answers a postcode
       // it does not know.
-      if (code === 22) {
-        root.statusText = "InPost does not know the postcode " + postcodeProc.postcode
-        return
-      }
-      if (code !== 0) {
-        root.statusText = "Could not reach InPost"
-        return
-      }
-      var found = Model.parseNearby(raw)
-      if (found.length === 0) {
-        root.statusText = "No air sensor near " + postcodeProc.postcode
-        return
-      }
-      root.candidates = found
-      root.searchOrigin = postcodeProc.postcode
-      root.candidatesFetchedAt = Date.now()
-      if (root.lockerId === "" && root.pinnedCode === "") root.resolveFrom(0)
+      if (code === 22) root.placeStatus = "InPost does not know the postcode " + postcodeProc.postcode
+      else if (!found) root.placeStatus = "Could not place the postcode " + postcodeProc.postcode
+      else root.placeResults = [found]
     }
   }
 
-  // Sensors around a locker typed in by code, for the list only: the typed
-  // locker itself is pinned and read through the usual path.
-  Process {
-    id: aroundProc
-    property string buffer: ""
-    property string origin: ""
-    property string latitude: "0"
-    property string longitude: "0"
-    readonly property int maxBytes: 600000
-
-    command: ["/usr/bin/bash", root.fetchHelper, "nearby"]
-    // What to fetch goes on stdin, not in argv: a coordinate, postcode or
-    // locker code says where somebody lives, and argv is public in /proc.
-    stdinEnabled: true
-    onStarted: {
-      write(aroundProc.latitude + " " + aroundProc.longitude + "\n")
-      stdinEnabled = false
-    }
-    clearEnvironment: true
-    environment: root.helperEnvironment
-
-    stdout: SplitParser {
-      splitMarker: ""
-      onRead: function(chunk) {
-        aroundProc.buffer += chunk
-        if (aroundProc.buffer.length > aroundProc.maxBytes) {
-          aroundProc.buffer = ""
-          aroundProc.signal(15)
-        }
-      }
-    }
-    stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
-
-    onExited: function(code, status) {
-      aroundProc.stdinEnabled = true
-      var found = code === 0 ? Model.parseNearby(aroundProc.buffer) : []
-      aroundProc.buffer = ""
-      // Only while that locker is still the one asked for.
-      if (found.length === 0 || root.pinnedCode !== aroundProc.origin) return
-      root.candidates = found
-      root.searchOrigin = aroundProc.origin
-      root.candidatesFetchedAt = Date.now()
-    }
-  }
-
-  // One locker, by code: what a hand-typed code resolves through, and what a
-  // pin pointing outside the nearby list falls back to.
-  Process {
-    id: pointProc
-    property string buffer: ""
-    property string code: ""
-    readonly property int maxBytes: 32000
-
-    command: ["/usr/bin/bash", root.fetchHelper, "point"]
-    // What to fetch goes on stdin, not in argv: a coordinate, postcode or
-    // locker code says where somebody lives, and argv is public in /proc.
-    stdinEnabled: true
-    onStarted: {
-      write(pointProc.code + "\n")
-      stdinEnabled = false
-    }
-    clearEnvironment: true
-    environment: root.helperEnvironment
-
-    stdout: SplitParser {
-      splitMarker: ""
-      onRead: function(chunk) {
-        pointProc.buffer += chunk
-        if (pointProc.buffer.length > pointProc.maxBytes) {
-          pointProc.buffer = ""
-          pointProc.signal(15)
-        }
-      }
-    }
-    stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
-
-    onExited: function(code, status) {
-      pointProc.stdinEnabled = true
-      var point = code === 0 ? Model.parsePoint(pointProc.buffer) : null
-      pointProc.buffer = ""
-
-      if (!point) {
-        root.statusText = "No locker called " + pointProc.code
-        return
-      }
-      // Only the address of the locker already being read was wanted.
-      if (root.lockerId !== "" && point.code === root.lockerCode) {
-        if (!root.locker) root.locker = point
-        return
-      }
-      if (!point.hasSensor) {
-        root.statusText = point.code + " has no air sensor"
-        return
-      }
-
-      root.manualPoint = point
-      root.resolveFrom(0)
-      // A locker typed in by hand is often somewhere else entirely; list the
-      // sensors around it too, so its neighbours are one click away.
-      if (point.latitude !== null && point.longitude !== null && !root.inCandidates(point.code))
-        root.findAround(point)
-    }
-  }
-
-  Process {
-    id: idProc
-    property string buffer: ""
-    property string slug: ""
-    readonly property int maxBytes: 4096
-
-    command: ["/usr/bin/bash", root.fetchHelper, "id"]
-    // What to fetch goes on stdin, not in argv: a coordinate, postcode or
-    // locker code says where somebody lives, and argv is public in /proc.
-    stdinEnabled: true
-    onStarted: {
-      write(idProc.slug + "\n")
-      stdinEnabled = false
-    }
-    clearEnvironment: true
-    environment: root.helperEnvironment
-
-    stdout: SplitParser {
-      splitMarker: ""
-      onRead: function(chunk) {
-        idProc.buffer += chunk
-        if (idProc.buffer.length > idProc.maxBytes) {
-          idProc.buffer = ""
-          idProc.signal(15)
-        }
-      }
-    }
-    // A locker whose page carries no sensor widget is an ordinary outcome, not
-    // an error worth showing: the walk simply moves to the next one.
-    stderr: SplitParser { splitMarker: ""; onRead: function(chunk) {} }
-
-    onExited: function(code, status) {
-      idProc.stdinEnabled = true
-      var parsed = null
-      if (code === 0) {
-        try {
-          parsed = JSON.parse(idProc.buffer || "{}")
-        } catch (e) {
-          parsed = null
-        }
-      }
-      idProc.buffer = ""
-
-      var list = root.resolutionList()
-      var point = list.length > root.resolveIndex ? list[root.resolveIndex] : null
-      var id = parsed ? Model.plain(parsed.id, 12) : ""
-
-      if (point && /^[0-9]{1,12}$/.test(id) && Model.plain(parsed.code, 32) === point.code) {
-        root.adoptLocker(point, id)
-        return
-      }
-      root.resolveFrom(root.resolveIndex + 1)
-    }
-  }
-
-  Process {
-    id: airProc
-    property string buffer: ""
-    readonly property int maxBytes: 24000
-
-    command: ["/usr/bin/bash", root.fetchHelper, "air"]
-    // What to fetch goes on stdin, not in argv: a coordinate, postcode or
-    // locker code says where somebody lives, and argv is public in /proc.
-    stdinEnabled: true
-    onStarted: {
-      write(root.lockerId + " " + root.lockerCode + "\n")
-      stdinEnabled = false
-    }
-    clearEnvironment: true
-    environment: root.helperEnvironment
-
-    stdout: SplitParser {
-      splitMarker: ""
-      onRead: function(chunk) {
-        airProc.buffer += chunk
-        if (airProc.buffer.length > airProc.maxBytes) {
-          airProc.buffer = ""
-          airProc.signal(15)
-          root.statusText = "Sensor response exceeded its size limit"
-        }
-      }
-    }
-    // curl's error text arrives in pieces, so it is collected whole (capped)
-    // and only read once the process is done: it carries the HTTP status that
-    // tells a block (403) from a locker gone quiet (404). It is never shown
-    // as is; Model.fetchFailure puts it in words.
-    property string errors: ""
-    stderr: SplitParser {
-      splitMarker: ""
-      onRead: function(chunk) {
-        if (airProc.errors.length < 1024) airProc.errors = (airProc.errors + chunk).slice(0, 1024)
-      }
-    }
-
-    onExited: function(code, status) {
-      airProc.stdinEnabled = true
-      var errors = airProc.errors
-      airProc.errors = ""
-      if (code !== 0) {
-        airProc.buffer = ""
-        // The previous reading stays on screen; a locker that has gone quiet
-        // for a minute is not a reason to blank the bar.
-        root.statusText = Model.fetchFailure(code, errors, root.lockerCode)
-        return
-      }
-      var parsed = Model.parseAirResponse(airProc.buffer)
-      airProc.buffer = ""
-      if (parsed) {
-        root.air = parsed
-        root.remember(parsed)
-        root.statusText = ""
-      }
-    }
-  }
-
-  // The stored trend: read once per locker, written after every new sample.
+  // The stored trend: read once per key, written after every new sample.
   // Both go through bin/inair-history, which owns the file, its permissions
-  // and its schema; the samples travel on stdin, never in argv, because a
-  // locker code says roughly where somebody lives.
+  // and its schema; the samples travel on stdin, never in argv, because a key
+  // says roughly where somebody lives.
   Process {
     id: historyReadProc
     property string buffer: ""
@@ -1077,8 +832,6 @@ Panel {
     environment: root.helperEnvironment
     stdinEnabled: true
 
-    // Which locker to read goes on stdin like everything else here: a code in
-    // argv would sit in /proc/<pid>/cmdline for anyone to see.
     onStarted: {
       write(historyReadProc.code + "\n")
       stdinEnabled = false
@@ -1103,8 +856,8 @@ Panel {
       var raw = code === 0 ? historyReadProc.buffer : "{}"
       historyReadProc.buffer = ""
       root.adoptStoredHistory(raw, historyReadProc.code)
-      // The locker may have changed while the read was in flight.
-      if (root.lockerCode !== historyReadProc.code) root.loadHistory()
+      // The key may have changed while the read was in flight.
+      if (root.historyKey !== historyReadProc.code) root.loadHistory()
     }
   }
 
@@ -1128,24 +881,6 @@ Panel {
       historyWriteProc.stdinEnabled = true
       if (root.historyWritePending) root.saveHistory()
     }
-  }
-
-  Timer {
-    id: airTimer
-    interval: root.refreshMinutes * 60 * 1000
-    running: root.lockerId !== ""
-    repeat: true
-    onTriggered: root.startAir()
-  }
-
-  // One retry a minute after a failed discovery, so a laptop that opened its
-  // lid before the Wi-Fi associated still finds its sensor without a click.
-  Timer {
-    id: retryTimer
-    interval: 60000
-    running: root.lockerId === "" && !root.discovering
-    repeat: true
-    onTriggered: root.beginDiscovery()
   }
 
   IpcHandler {
@@ -1174,16 +909,33 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      // While the code field has the keyboard, plain letters belong in it, not
-      // in the panel's own shortcuts.
+      // While the search field has the keyboard, keys belong to it.
       blocked: root.searching
-      onReturnRequested: root.startSearching()
-      onCloseRequested: root.close()
+
+      onCloseRequested: {
+        if (root.previewId !== "") root.previewId = ""
+        else if (root.settingsOpen && !root.setupNeeded) root.closeSettings()
+        else root.close()
+      }
       onTabRequested: function(direction) { root.switchPanel(direction) }
-      // The header buttons, from the keyboard: / or c for a code, i for the
-      // index scale, s for the skin, r to refresh.
+      onMoveRequested: function(dx, dy) {
+        if (root.showingSetup && bodyLoader.item && bodyLoader.item.move) bodyLoader.item.move(dy)
+      }
+      onActivateRequested: {
+        if (root.showingSetup && bodyLoader.item && bodyLoader.item.activate) bodyLoader.item.activate()
+      }
+      // / search, o settings, 1–4 preview a source, i scale, s skin,
+      // r refresh; on the settings page [ and ] move a source up or down.
       onTextKey: function(text) {
-        if (text === "/" || text === "c") root.startSearching()
+        if (root.showingSetup) {
+          if (text === "/") root.searchFocusRequested()
+          else if ((text === "[" || text === "]") && bodyLoader.item && bodyLoader.item.reorder)
+            bodyLoader.item.reorder(text === "[" ? -1 : 1)
+          return
+        }
+        if (text === "/") root.openSettings(true)
+        else if (text === "o") root.openSettings(false)
+        else if (text >= "1" && text <= "4") root.previewIndex(Number(text))
         else if (text === "i") root.cycleScale()
         else if (text === "s") root.cycleStyle()
         else if (text === "r" && !root.busy) root.refreshEverything()
@@ -1198,15 +950,19 @@ Panel {
         boundsBehavior: Flickable.StopAtBounds
         interactive: contentHeight > height
 
-        // Two skins over one state. The views are pure presentation: they read
-        // this panel and call back into it, so switching skins cannot lose a
-        // reading, drop the pinned locker or restart a fetch.
+        // Two skins and the settings page over one state. The views are pure
+        // presentation: they read this panel and call back into it, so
+        // switching cannot lose a reading or restart a fetch.
         Loader {
           id: bodyLoader
           width: scroll.width
           height: item ? item.implicitHeight : 0
-          source: Qt.resolvedUrl(root.style === "plain" ? "ModernView.qml" : "TerminalView.qml")
-          onLoaded: if (item && "panel" in item) item.panel = root
+          source: Qt.resolvedUrl(root.showingSetup ? "SetupView.qml"
+            : (root.style === "plain" ? "ModernView.qml" : "TerminalView.qml"))
+          onLoaded: {
+            if (item && "terminal" in item) item.terminal = root.style !== "plain"
+            if (item && "panel" in item) item.panel = root
+          }
         }
       }
     }
