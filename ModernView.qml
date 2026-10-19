@@ -22,13 +22,12 @@ Item {
   readonly property color faint: panel ? panel.faint : Qt.darker(foreground, 1.9)
   readonly property string fontFamily: panel ? panel.fontFamily : Style.font.family
   readonly property var candidates: panel ? panel.candidates : []
-  readonly property var locker: panel ? panel.locker : null
   readonly property string lockerCode: panel ? panel.lockerCode : ""
   readonly property string pinnedCode: panel ? panel.pinnedCode : ""
+  readonly property bool indexOnly: panel ? panel.indexOnly : false
   readonly property string scale: panel ? panel.scale : "polish"
   readonly property string statusText: panel ? panel.statusText : ""
   readonly property bool busy: panel ? panel.busy : false
-  readonly property bool searching: panel ? panel.searching : false
 
   function tint(alpha) {
     return Qt.rgba(foreground.r, foreground.g, foreground.b, alpha)
@@ -137,15 +136,12 @@ Item {
 
         PanelActionButton {
           iconText: "󰍉"
-          tooltipText: "Find sensors near a postcode, or a locker by its code  [/]"
-          foreground: view.searching ? view.levelColor : view.dim
+          tooltipText: "Search a place, postcode or locker code  [/]"
+          foreground: view.dim
           hoverColor: view.foreground
           fontFamily: view.fontFamily
           fontSize: Style.font.bodySmall
-          onClicked: {
-            if (!view.panel) return
-            view.searching ? view.panel.stopSearching() : view.panel.startSearching()
-          }
+          onClicked: if (view.panel) view.panel.openSettings(true)
         }
 
         PanelActionButton {
@@ -163,6 +159,16 @@ Item {
         }
 
         PanelActionButton {
+          iconText: "󰒓"
+          tooltipText: "Places and sources  [o]"
+          foreground: view.dim
+          hoverColor: view.foreground
+          fontFamily: view.fontFamily
+          fontSize: Style.font.bodySmall
+          onClicked: if (view.panel) view.panel.openSettings(false)
+        }
+
+        PanelActionButton {
           iconText: "󰆍"
           tooltipText: "Switch to the terminal skin  [s]"
           foreground: view.dim
@@ -174,7 +180,7 @@ Item {
 
         PanelActionButton {
           iconText: "󰑐"
-          tooltipText: "Refresh readings and the locker list  [r]"
+          tooltipText: "Refresh every source  [r]"
           enabled: !view.busy
           foreground: view.busy ? view.faint : view.dim
           hoverColor: view.foreground
@@ -240,7 +246,7 @@ Item {
             }
             Text {
               textFormat: Text.PlainText
-              text: view.scale === "european" ? "EEA INDEX" : "GIOŚ INDEX"
+              text: view.panel ? view.panel.indexName : "GIOŚ INDEX"
               color: view.dim
               font.family: view.fontFamily
               font.pixelSize: Style.font.caption
@@ -264,6 +270,7 @@ Item {
           Text {
             textFormat: Text.PlainText
             text: {
+              if (view.indexOnly) return view.levelMeta.short
               var pm25 = view.air ? Model.value(view.air.readings, "pm25") : null
               return pm25 === null ? "—" : Model.formatValue(pm25)
             }
@@ -273,6 +280,7 @@ Item {
             font.bold: true
           }
           Text {
+            visible: !view.indexOnly
             textFormat: Text.PlainText
             text: "µg/m³"
             color: view.dim
@@ -284,6 +292,7 @@ Item {
         }
 
         Text {
+          visible: !view.indexOnly
           anchors.right: parent.right
           textFormat: Text.PlainText
           text: "PM2.5"
@@ -295,110 +304,44 @@ Item {
       }
     }
 
-    // ---- which locker, how far, how fresh
+    // ---- which source, how far, how fresh
     Column {
       width: column.innerWidth
       x: column.inset
       spacing: Style.space(2)
 
-      Row {
-        width: parent.width
-        spacing: Style.space(6)
-
-        Text {
-          textFormat: Text.PlainText
-          text: view.pinnedCode !== "" ? "󰐃" : "󰍎"
-          color: view.pinnedCode !== "" ? view.levelColor : view.dim
-          font.family: view.fontFamily
-          font.pixelSize: Style.font.bodySmall
-          anchors.verticalCenter: parent.verticalCenter
-        }
-        Text {
-          textFormat: Text.PlainText
-          width: parent.width - Style.space(24)
-          elide: Text.ElideRight
-          text: view.locker
-            ? (view.lockerCode + " · " + Model.lockerTitle(view.locker))
-            : (view.lockerCode !== "" ? view.lockerCode
-               : (view.busy ? "Looking for a sensor…" : "No sensor selected"))
-          color: view.foreground
-          font.family: view.fontFamily
-          font.pixelSize: Style.font.body
-        }
-      }
-
       Text {
-        textFormat: Text.PlainText
         width: parent.width
         elide: Text.ElideRight
-        x: Style.space(24)
-        text: {
-          var parts = []
-          if (view.locker && view.locker.city !== "") parts.push(view.locker.city)
-          if (view.locker && view.locker.distance !== null)
-            parts.push(Model.formatDistance(view.locker.distance) + " away")
-          if (view.air) parts.push("updated " + Model.relativeTime(view.air.at, new Date()))
-          return parts.join(" · ")
-        }
+        textFormat: Text.PlainText
+        text: view.panel ? view.panel.sourceTitle : ""
+        color: view.foreground
+        font.family: view.fontFamily
+        font.pixelSize: Style.font.body
+      }
+      Text {
+        width: parent.width
+        elide: Text.ElideRight
+        textFormat: Text.PlainText
+        text: (view.panel ? view.panel.sourceDetail : "")
+          + (view.panel && view.panel.previewId !== "" ? " · previewing, Esc to go back" : "")
         color: view.dim
         font.family: view.fontFamily
         font.pixelSize: Style.font.bodySmall
       }
-    }
-
-    // ---- type a locker code
-    Row {
-      x: column.inset
-      width: column.innerWidth
-      spacing: Style.space(6)
-      visible: view.searching
-
-      TextField {
-        id: codeField
-        width: parent.width - Style.space(64)
-        placeholderText: "Postcode or locker code, e.g. 31-042 or KRA80M"
-        foreground: view.foreground
+      Text {
+        width: parent.width
+        visible: view.indexOnly
+        wrapMode: Text.WordWrap
+        textFormat: Text.PlainText
+        text: "InPost blocks its readings; this is its index only."
+        color: view.faint
         font.family: view.fontFamily
-        // The code goes into a URL; the helper enforces the same alphabet
-        // again, but nothing oversized gets that far.
-        maximumLength: 32
-
-        Keys.onPressed: function(event) {
-          if (!view.panel) return
-          if (event.key === Qt.Key_Escape) {
-            view.panel.stopSearching()
-            event.accepted = true
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            view.panel.submitCode(codeField.text)
-            event.accepted = true
-          }
-        }
-      }
-
-      PanelActionButton {
-        iconText: "󰄬"
-        tooltipText: "Search"
-        foreground: view.dim
-        hoverColor: view.levelColor
-        fontFamily: view.fontFamily
-        fontSize: Style.font.bodySmall
-        anchors.verticalCenter: parent.verticalCenter
-        onClicked: if (view.panel) view.panel.submitCode(codeField.text)
-      }
-
-      PanelActionButton {
-        iconText: "󰅖"
-        tooltipText: "Cancel"
-        foreground: view.dim
-        hoverColor: view.foreground
-        fontFamily: view.fontFamily
-        fontSize: Style.font.bodySmall
-        anchors.verticalCenter: parent.verticalCenter
-        onClicked: if (view.panel) view.panel.stopSearching()
+        font.pixelSize: Style.font.caption
       }
     }
 
-    PanelSeparator { width: parent.width; visible: view.air !== null }
+    PanelSeparator { width: parent.width; visible: view.air !== null && !view.indexOnly }
 
     // ---- every reading the locker published
     Column {
@@ -516,7 +459,7 @@ Item {
       readonly property int cells: 48
       readonly property real norm: 25
       readonly property var trend: view.panel
-        ? Model.trendBuckets(view.panel.history, "pm25", cells, Date.now(),
+        ? Model.trendBuckets(view.panel.shownHistory, "pm25", cells, Date.now(),
                              view.panel.historyWindow, ["pm10"])
         : ({ values: [], extra: {}, span: 0, start: 0, end: 0 })
       readonly property var levels: Model.trendLevels(trend, view.scale)
@@ -779,6 +722,101 @@ Item {
       }
     }
 
+    PanelSeparator { width: parent.width; visible: view.panel !== null && view.panel.cards.length > 1 }
+
+    // ---- every enabled source; click or 1–4 to look at it
+    Column {
+      width: column.innerWidth
+      x: column.inset
+      spacing: Style.space(4)
+      visible: view.panel !== null && view.panel.cards.length > 1
+
+      PanelSectionHeader { text: "SOURCES"; foreground: view.dim; fontFamily: view.fontFamily }
+
+      Repeater {
+        model: view.panel ? view.panel.cards : []
+
+        Rectangle {
+          required property var modelData
+          width: parent.width
+          height: Style.space(26)
+          radius: Math.min(Style.space(5), Style.cornerRadius)
+          color: modelData.shown ? view.tint(0.07) : (cardHover.containsMouse ? view.tint(0.11) : "transparent")
+
+          Row {
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(8)
+
+            Rectangle {
+              width: Style.space(7)
+              height: width
+              radius: width / 2
+              anchors.verticalCenter: parent.verticalCenter
+              color: modelData.level === "" ? view.faint
+                : (view.panel ? view.panel.ink(Model.levelInfo(modelData.level, modelData.scale).color) : view.faint)
+            }
+            Text {
+              textFormat: Text.PlainText
+              text: modelData.label
+              color: modelData.fresh ? view.foreground : view.dim
+              font.family: view.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              font.bold: modelData.shown
+              width: Style.space(120)
+            }
+            Text {
+              textFormat: Text.PlainText
+              text: modelData.pm25 !== null
+                ? "PM2.5 " + Model.formatValue(modelData.pm25, 0)
+                  + (modelData.pm10 !== null ? " · PM10 " + Model.formatValue(modelData.pm10, 0) : "")
+                : (modelData.level !== "" ? Model.levelInfo(modelData.level, modelData.scale).label
+                   : (modelData.status !== "" ? modelData.status : "waiting…"))
+              color: modelData.fresh ? view.foreground : view.faint
+              font.family: view.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+              width: Style.space(190)
+            }
+          }
+
+          Text {
+            anchors.right: parent.right
+            anchors.rightMargin: Style.space(8)
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: modelData.at > 0 && view.panel ? Model.relativeTime(modelData.at, view.panel.clock) : ""
+            color: view.dim
+            font.family: view.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          MouseArea {
+            id: cardHover
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: if (view.panel) view.panel.previewSource(modelData.id)
+          }
+        }
+      }
+    }
+
+    // ---- the Sensor.Community sites the median came from
+    Text {
+      x: column.inset
+      width: column.innerWidth
+      wrapMode: Text.WordWrap
+      textFormat: Text.PlainText
+      visible: view.panel !== null && view.panel.members.length > 0
+      text: view.panel ? "Median of sites " + view.panel.members.map(function(m) {
+        return m.id + " (" + Model.formatDistance(m.distance) + ")" }).join(", ") : ""
+      color: view.faint
+      font.family: view.fontFamily
+      font.pixelSize: Style.font.caption
+    }
+
     PanelSeparator { width: parent.width; visible: view.candidates.length > 0 }
 
     // ---- other sensors in range, click to pin
@@ -795,8 +833,7 @@ Item {
         PanelSectionHeader {
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: view.panel && view.panel.searchOrigin !== ""
-            ? "SENSORS NEAR " + view.panel.searchOrigin : "SENSORS IN RANGE"
+          text: "INPOST LOCKERS IN RANGE"
           foreground: view.dim
           fontFamily: view.fontFamily
         }
@@ -930,27 +967,22 @@ Item {
       width: column.innerWidth
       wrapMode: Text.WordWrap
       textFormat: Text.PlainText
-      text: "Keys: / find · i index · s skin · r refresh — right-click the pill for the index, middle-click to refresh"
+      text: "Keys: / find · o settings · 1–4 source · i index · s skin · r refresh — right-click the pill for the index, middle-click to refresh"
       color: view.faint
       font.family: view.fontFamily
       font.pixelSize: Style.font.caption
     }
-  }
 
-  // The panel only raises a flag; the loaded skin owns its own field and so
-  // owns the focus that goes with it.
-  Connections {
-    target: view.panel
-
-    function onSearchingChanged() {
-      if (!view.panel) return
-      if (view.panel.searching) {
-        codeField.text = view.pinnedCode
-        codeField.forceActiveFocus()
-        codeField.selectAll()
-      } else {
-        codeField.text = ""
-      }
+    Text {
+      x: column.inset
+      width: column.innerWidth
+      wrapMode: Text.WordWrap
+      textFormat: Text.PlainText
+      visible: view.panel !== null && view.panel.attributionText !== ""
+      text: view.panel ? view.panel.attributionText : ""
+      color: view.faint
+      font.family: view.fontFamily
+      font.pixelSize: Style.font.caption
     }
   }
 }

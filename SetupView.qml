@@ -94,7 +94,10 @@ Item {
     return "No place yet"
   }
 
+  // The row helpers can run once more while the view is being torn down,
+  // after the panel has let go of it.
   function rowText(row) {
+    if (!panel) return ""
     if (row.kind === "result") return row.place.name + (row.place.detail ? " — " + row.place.detail : "")
     if (row.kind === "weather")
       return "Use the Weather widget's location" + (panel.weatherPlace.name ? " (" + panel.weatherPlace.name + ")" : "")
@@ -107,6 +110,7 @@ Item {
   }
 
   function rowDetail(row) {
+    if (!panel) return ""
     if (row.kind === "refresh") return "No source is asked more often than it updates"
     if (row.kind !== "source") return ""
     var meta = Sources.info(row.id)
@@ -118,6 +122,7 @@ Item {
   }
 
   function rowOn(row) {
+    if (!panel) return false
     if (row.kind === "source") return panel.sources.indexOf(row.id) >= 0
     if (row.kind === "weather") return panel.storedPlace === null
     return false
@@ -261,7 +266,7 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
             }
             ToggleSwitch {
-              visible: !view.terminal && rowItem.modelData.kind === "source"
+              visible: !view.terminal && (rowItem.modelData.kind === "source" || rowItem.modelData.kind === "weather")
               checked: view.rowOn(rowItem.modelData)
               interactive: false
               cursorRing: false
