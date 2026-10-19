@@ -56,7 +56,7 @@ Item {
   // Header buttons: four of them, two cells each, one cell apart. The top rule
   // leaves `actionReserve` cells blank for them to float over.
   readonly property int actionCells: 2
-  readonly property int actionCount: 4
+  readonly property int actionCount: 5
   readonly property int actionReserve: actionCount * actionCells + (actionCount - 1) + 3
 
   implicitHeight: body.implicitHeight
@@ -123,22 +123,24 @@ Item {
 
         ActionGlyph {
           glyph: "󰍉"
-          tip: "Find sensors near a postcode, or a locker by its code  [/]"
-          on: view.panel !== null && view.panel.searching
-          onActivated: {
-            if (!view.panel) return
-            view.panel.searching ? view.panel.stopSearching() : view.panel.startSearching()
-          }
+          tip: "Search a place, postcode or locker code  [/]"
+          onActivated: if (view.panel) view.panel.openSettings(true)
         }
         // The scale is shown by name rather than by a swap icon: what the
         // button switches *to* is the question, and PL/EU answers it.
         ActionGlyph {
           glyph: view.scale === "european" ? "EU" : "PL"
-          tip: view.scale === "european"
+          tip: (view.scale === "european"
             ? "European (EEA) index — click for Polish (GIOŚ)  [i]"
-            : "Polish (GIOŚ) index — click for European (EEA)  [i]"
+            : "Polish (GIOŚ) index — click for European (EEA)  [i]")
+            + (view.indexOnly ? " · InPost's level is always Polish" : "")
           on: true
           onActivated: if (view.panel) view.panel.cycleScale()
+        }
+        ActionGlyph {
+          glyph: "󰒓"
+          tip: "Places and sources  [o]"
+          onActivated: if (view.panel) view.panel.openSettings(false)
         }
         ActionGlyph {
           glyph: "󰕮"
@@ -148,7 +150,7 @@ Item {
         ActionGlyph {
           id: refreshGlyph
           glyph: "󰑐"
-          tip: "Refresh readings and the locker list  [r]"
+          tip: "Refresh every source  [r]"
           dimmed: view.panel !== null && view.panel.busy
           spinning: dimmed
           onActivated: if (view.panel && !view.panel.busy) view.panel.refreshEverything()
@@ -207,7 +209,7 @@ Item {
         }
         Text {
           textFormat: Text.PlainText
-          text: view.scale === "european" ? "EEA INDEX" : "GIOŚ INDEX"
+          text: view.panel ? view.panel.indexName : "GIOŚ INDEX"
           color: view.dim
           font.family: view.fontFamily
           font.pixelSize: view.fontSize
@@ -220,8 +222,20 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: view.cellWidth
 
+        Text {
+          visible: view.indexOnly
+          textFormat: Text.PlainText
+          text: view.panel ? view.panel.levelMeta.short : "—"
+          color: view.levelColor
+          font.family: view.fontFamily
+          font.pixelSize: view.fontSize * 2
+          font.bold: true
+          anchors.bottom: parent.bottom
+        }
+
         PixelNumber {
           id: digits
+          visible: !view.indexOnly
           text: view.heroValue === "—" ? "-" : view.heroValue
           pixel: Math.max(4, Math.round(view.rowHeight / 4))
           color: view.foreground
@@ -229,6 +243,7 @@ Item {
         }
 
         Column {
+          visible: !view.indexOnly
           anchors.bottom: parent.bottom
           Text {
             textFormat: Text.PlainText
@@ -250,85 +265,25 @@ Item {
 
     GridLine { line: Model.frameRow("", view.cols) }
 
-    // ---- which locker
+    // ---- which source, how far, how fresh
     GridRow {
       segments: [
-        { text: (view.panel && view.panel.pinnedCode !== "" ? "◆ " : "○ "), color: view.levelColor },
-        { text: Model.padRight(view.lockerLine, view.inner - 2), color: view.foreground }
+        { text: view.panel && view.panel.previewId !== "" ? "◇ " : "◆ ", color: view.levelColor },
+        { text: Model.padRight(view.panel ? view.panel.sourceTitle : "", view.inner - 2), color: view.foreground }
       ]
     }
 
     GridRow {
       segments: [
-        { text: Model.padRight("  " + view.metaLine, view.inner), color: view.dim }
+        { text: Model.padRight("  " + (view.panel ? view.panel.sourceDetail : ""), view.inner), color: view.dim }
       ]
     }
 
-    // ---- type a code, TUI style: a prompt and a block cursor
-    Item {
-      width: parent.width
-      height: promptLine.height
-      visible: view.panel ? view.panel.searching : false
-
-      GridLine {
-        id: promptLine
-        line: Model.frameRow("find › " + Model.repeat("_", Math.max(4, view.inner - 7)), view.cols)
-        color: view.dim
-      }
-
-      TextInput {
-        id: codeInput
-        x: view.cellWidth * 9
-        width: view.cellWidth * Math.max(4, view.inner - 7)
-        anchors.verticalCenter: promptLine.verticalCenter
-        color: view.foreground
-        font.family: view.fontFamily
-        font.pixelSize: view.fontSize
-        // The code is bound for a URL; the helper holds it to the same
-        // alphabet again, but nothing oversized gets that far.
-        maximumLength: 32
-        selectByMouse: true
-        selectionColor: Qt.rgba(view.levelColor.r, view.levelColor.g, view.levelColor.b, 0.3)
-
-        cursorDelegate: Rectangle {
-          width: view.cellWidth
-          height: cell.height * 0.9
-          color: view.levelColor
-          opacity: 0.8
-
-          SequentialAnimation on opacity {
-            running: codeInput.activeFocus
-            loops: Animation.Infinite
-            NumberAnimation { to: 0.1; duration: 520 }
-            NumberAnimation { to: 0.8; duration: 520 }
-          }
-        }
-
-        Keys.onPressed: function(event) {
-          if (!view.panel) return
-          if (event.key === Qt.Key_Escape) {
-            view.panel.stopSearching()
-            event.accepted = true
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            view.panel.submitCode(codeInput.text)
-            event.accepted = true
-          }
-        }
-      }
-
-      Connections {
-        target: view.panel
-        function onSearchingChanged() {
-          if (!view.panel) return
-          if (view.panel.searching) {
-            codeInput.text = view.panel.pinnedCode
-            codeInput.forceActiveFocus()
-            codeInput.selectAll()
-          } else {
-            codeInput.text = ""
-          }
-        }
-      }
+    GridRow {
+      visible: view.indexOnly
+      segments: [
+        { text: Model.padRight("  InPost blocks its readings; this is its index only", view.inner), color: view.faint }
+      ]
     }
 
     GridLine { line: Model.frameRow("", view.cols) }
@@ -372,7 +327,7 @@ Item {
     GridRow {
       readonly property int sparkCells: Math.max(4, view.inner - 20)
       readonly property var trend: view.panel
-        ? Model.trendBuckets(view.panel.history, "pm25", sparkCells, Date.now(),
+        ? Model.trendBuckets(view.panel.shownHistory, "pm25", sparkCells, Date.now(),
                              view.panel.historyWindow, ["pm10"])
         : ({ values: [], extra: {}, span: 0 })
       readonly property string line: Model.sparkline(trend.values, sparkCells)
@@ -448,10 +403,81 @@ Item {
 
     GridLine { line: Model.frameRow("", view.cols); visible: view.panel !== null && view.panel.air !== null }
 
+    // ---- every enabled source, one line each; click or 1–4 to look at it
+    GridLine {
+      line: Model.frameSection("SOURCES", view.cols)
+      visible: view.panel !== null && view.panel.cards.length > 1
+    }
+
+    Repeater {
+      model: view.panel && view.panel.cards.length > 1 ? view.panel.cards : []
+
+      Item {
+        required property var modelData
+        width: body.width
+        height: cardLine.height
+
+        Rectangle {
+          x: view.cellWidth
+          width: view.cellWidth * (view.cols - 2)
+          height: parent.height
+          color: cardHover.containsMouse
+            ? Qt.rgba(view.foreground.r, view.foreground.g, view.foreground.b, 0.12)
+            : (modelData.shown ? Qt.rgba(view.foreground.r, view.foreground.g, view.foreground.b, 0.06) : "transparent")
+        }
+
+        GridRow {
+          id: cardLine
+          readonly property string numbers: modelData.pm25 !== null
+            ? "PM2.5 " + Model.formatValue(modelData.pm25, 0)
+              + (modelData.pm10 !== null ? "  PM10 " + Model.formatValue(modelData.pm10, 0) : "")
+            : (modelData.level !== "" ? Model.levelInfo(modelData.level, modelData.scale).short
+               : (modelData.status !== "" ? modelData.status : "…"))
+          readonly property string age: modelData.at > 0 && view.panel
+            ? Model.relativeTime(modelData.at, view.panel.clock) : ""
+          segments: [
+            { text: modelData.shown ? "› " : "  ", color: view.levelColor },
+            { text: "● ", color: modelData.level === "" ? view.faint
+                : view.ink(Model.levelInfo(modelData.level, modelData.scale).color) },
+            { text: Model.padRight((modelData.index + 1) + " " + modelData.label, 19),
+              color: modelData.fresh ? view.foreground : view.dim },
+            { text: Model.padRight(numbers, Math.max(4, view.inner - 35)),
+              color: modelData.fresh ? view.foreground : view.dim },
+            { text: Model.padLeft(age, 12), color: view.dim }
+          ]
+        }
+
+        MouseArea {
+          id: cardHover
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: if (view.panel) view.panel.previewSource(modelData.id)
+        }
+      }
+    }
+
+    // ---- which Sensor.Community sensors the median came from
+    GridLine {
+      line: Model.frameSection("IN THE MEDIAN", view.cols)
+      visible: view.panel !== null && view.panel.members.length > 0
+    }
+
+    Repeater {
+      model: view.panel ? view.panel.members : []
+
+      GridRow {
+        required property var modelData
+        segments: [
+          { text: Model.padRight("  sensor site " + modelData.id, view.inner - 10), color: view.dim },
+          { text: Model.padLeft(Model.formatDistance(modelData.distance), 10), color: view.dim }
+        ]
+      }
+    }
+
     // ---- sensors in range
     GridLine {
-      line: Model.frameSection(view.panel && view.panel.searchOrigin !== ""
-        ? "SENSORS NEAR " + view.panel.searchOrigin : "SENSORS IN RANGE", view.cols)
+      line: Model.frameSection("INPOST LOCKERS IN RANGE", view.cols)
       visible: view.panel !== null && view.panel.candidates.length > 0
     }
 
@@ -545,8 +571,17 @@ Item {
 
     // ---- the shortcut legend, in the bottom rule's voice
     GridRow {
-      segments: [{ text: Model.padRight("/ find · i index · s skin · r refresh", view.inner),
+      segments: [{ text: Model.padRight("/ find · o setup · 1-4 source · i s r", view.inner),
                    color: view.faint }]
+    }
+
+    Repeater {
+      model: view.wrap(view.panel ? view.panel.attributionText : "")
+
+      GridRow {
+        required property var modelData
+        segments: [{ text: Model.padRight(modelData, view.inner), color: view.faint }]
+      }
     }
 
     GridLine { id: bottomRule; line: Model.frameBottom(view.cols); color: view.levelColor }
@@ -560,22 +595,7 @@ Item {
     return pm25 === null ? "—" : Model.formatValue(pm25)
   }
 
-  readonly property string lockerLine: {
-    if (!panel) return ""
-    if (panel.locker) return panel.lockerCode + " · " + Model.lockerTitle(panel.locker)
-    if (panel.lockerCode !== "") return panel.lockerCode
-    return panel.busy ? "scanning…" : "no sensor selected"
-  }
-
-  readonly property string metaLine: {
-    if (!panel) return ""
-    var parts = []
-    if (panel.locker && panel.locker.city !== "") parts.push(panel.locker.city)
-    if (panel.locker && panel.locker.distance !== null)
-      parts.push(Model.formatDistance(panel.locker.distance))
-    if (panel.air) parts.push(Model.relativeTime(panel.air.at, new Date()))
-    return parts.join(" · ")
-  }
+  readonly property bool indexOnly: panel ? panel.indexOnly : false
 
   readonly property bool hasWeather: {
     if (!panel || !panel.air) return false
@@ -584,12 +604,12 @@ Item {
       || Model.value(r, "pressure") !== null
   }
 
-  // How much time the sparkline covers, from the samples' own timestamps.
-  // Status text is wrapped here rather than by Text.WordWrap, because a
-  // wrapped Text would push its own second line past the frame's right wall.
-  readonly property var statusLines: {
-    if (!panel || panel.statusText === "") return []
-    var words = String(panel.statusText).split(" ")
+  // Status and attribution text are wrapped here rather than by
+  // Text.WordWrap, because a wrapped Text would push its own second line past
+  // the frame's right wall.
+  function wrap(text) {
+    if (!text) return []
+    var words = String(text).split(" ")
     var lines = []
     var line = ""
     for (var i = 0; i < words.length && lines.length < 4; i++) {
@@ -604,6 +624,8 @@ Item {
     if (line !== "" && lines.length < 4) lines.push(line)
     return lines
   }
+
+  readonly property var statusLines: panel ? wrap(panel.statusText) : []
 
   // The frame's two vertical walls, from the top rule to the bottom one, in
   // column 0 and column cols-1 where the box-drawing corners sit. One │ per
