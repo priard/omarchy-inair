@@ -25,6 +25,11 @@
 #   point     GET  api-shipx-pl.easypack24.net/v1/points/<code>
 #   id      GET  inpost.pl/<locker-page-slug>
 #   air     POST inpost.pl/shipx-point-data/<id>/<code>/air_index_level
+#   sc-box  GET  data.sensor.community/airrohr/v1/filter/box=S,W,N,E
+#   gios-*  GET  api.gios.gov.pl/pjp-api/v1/rest/… (station list, sensors,
+#                data, index) — never given a coordinate
+#   om-current GET air-quality-api.open-meteo.com/v1/air-quality?…
+#   geocode GET  geocoding-api.open-meteo.com/v1/search?name=…
 
 set -uo pipefail
 LC_ALL=C
@@ -35,6 +40,7 @@ readonly HEAD=/usr/bin/head
 readonly TIMEOUT=/usr/bin/timeout
 readonly SETSID=/usr/bin/setsid
 readonly GREP=/usr/bin/grep
+readonly OD=/usr/bin/od
 
 # Point searches ask only for the fields the widget reads, which keeps 300
 # points to roughly 115 KB; the locker page is ~80 KB of HTML. The
@@ -43,6 +49,12 @@ readonly GREP=/usr/bin/grep
 readonly MAX_POINTS=524288
 readonly MAX_PAGE=524288
 readonly MAX_AIR=16384
+# A 10 km Sensor.Community box in a big city is a few hundred KB of
+# five-minute samples; the GIOŚ station list is ~90 KB; everything else is a
+# few KB.
+readonly MAX_SC=1048576
+readonly MAX_LIST=262144
+readonly MAX_SMALL=65536
 
 readonly UA='omarchy-inair'
 
@@ -64,7 +76,14 @@ fetch() {
   local url="$1" max="$2"
   shift 2
 
-  [[ $url =~ ^https://[A-Za-z0-9.-]+/[A-Za-z0-9./?=\&,_:-]*$ ]] || die "refusing URL"
+  [[ $url =~ ^https://[A-Za-z0-9.-]+/[A-Za-z0-9./?=\&,_:%-]*$ ]] || die "refusing URL"
+
+  # For tests: what would be fetched, without fetching it. The widget runs
+  # this helper with an emptied environment, so it cannot turn this on.
+  if [ "${INAIR_DRY_RUN:-}" = 1 ]; then
+    printf '%s\n' "$url"
+    return 0
+  fi
 
   local out
   out=$(printf 'url = "%s"\n' "$url" \
@@ -159,12 +178,84 @@ cmd_air() {
     -X POST -H 'X-Requested-With: XMLHttpRequest'
 }
 
+readonly GIOS="https://api.gios.gov.pl/pjp-api/v1/rest"
+
+# The four corners arrive already rounded by the widget; each is held to the
+# coordinate pattern before it reaches the URL.
+cmd_sc_box() {
+  [ "$#" -eq 4 ] || die "sc-box needs four coordinates"
+  local c
+  for c in "$@"; do valid_coord "$c" || die "invalid coordinate"; done
+  fetch "https://data.sensor.community/airrohr/v1/filter/box=$1,$2,$3,$4" "$MAX_SC"
+}
+
+# GIOŚ is asked for its whole station list and the nearest station is picked
+# in the widget, so this source never learns where the user is.
+cmd_gios_stations() {
+  fetch "${GIOS}/station/findAll?size=500" "$MAX_LIST"
+}
+
+valid_id() {
+  [[ $1 =~ ^[0-9]{1,9}$ ]]
+}
+
+cmd_gios_sensors() {
+  valid_id "${1:-}" || die "invalid station id"
+  fetch "${GIOS}/station/sensors/$1" "$MAX_SMALL"
+}
+
+cmd_gios_data() {
+  valid_id "${1:-}" || die "invalid sensor id"
+  fetch "${GIOS}/data/getData/$1" "$MAX_SMALL"
+}
+
+cmd_gios_index() {
+  valid_id "${1:-}" || die "invalid station id"
+  fetch "${GIOS}/aqindex/getIndex/$1" "$MAX_SMALL"
+}
+
+cmd_om_current() {
+  local lat="${1:-}" lon="${2:-}"
+  valid_coord "$lat" || die "invalid latitude"
+  valid_coord "$lon" || die "invalid longitude"
+  fetch "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=pm10,pm2_5,european_aqi&timezone=auto" \
+    "$MAX_SMALL"
+}
+
+# Every byte that is not an ASCII letter or digit leaves as %XX, so whatever
+# was typed — Polish letters, a hyphen, a quote — reaches the URL as the same
+# closed alphabet the fetch check enforces. The bytes come from od, not from
+# printf's locale-dependent character arithmetic.
+urlencode() {
+  local hex out="" b
+  hex=$(printf '%s' "$1" | "$OD" -An -tx1 -v)
+  for b in $hex; do
+    case $b in
+      3[0-9]|4[1-9a-f]|5[0-9a]|6[1-9a-f]|7[0-9a]) out+=$(printf "\\x$b") ;;
+      *) out+="%${b^^}" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# A place name as typed. The words arrive split on spaces and are joined
+# back; the length cap is in bytes, generous for any real place name.
+cmd_geocode() {
+  local name="$*"
+  [ -n "$name" ] || die "empty place name"
+  [ "${#name}" -le 96 ] || die "place name too long"
+  [[ $name =~ [[:cntrl:]] ]] && die "control character in place name"
+  fetch "https://geocoding-api.open-meteo.com/v1/search?name=$(urlencode "$name")&count=5&language=pl&format=json" \
+    "$MAX_SMALL"
+}
+
 # The arguments of a subcommand: from argv when given there (by hand), else
 # one line of at most 512 bytes on stdin, split on spaces. Each is validated by
 # the subcommand before it is used.
 COMMAND="${1:-}"
 shift || true
-if [ "$#" -eq 0 ]; then
+# The station list takes no argument, and there is nothing to wait for.
+if [ "$#" -eq 0 ] && [ "$COMMAND" != gios-stations ]; then
   line=""
   IFS= read -r -t 5 -n 512 line || [ -n "$line" ] || die "no arguments on stdin"
   read -r -a ARGS <<<"$line"
@@ -177,5 +268,12 @@ case "$COMMAND" in
   point)  cmd_point "$@" ;;
   id)     cmd_id "$@" ;;
   air)    cmd_air "$@" ;;
-  *)      die "usage: inair-fetch nearby|postcode|point|id|air, arguments on stdin: LAT LON | NN-NNN | CODE | SLUG | ID CODE" ;;
+  sc-box) cmd_sc_box "$@" ;;
+  gios-stations) cmd_gios_stations ;;
+  gios-sensors) cmd_gios_sensors "$@" ;;
+  gios-data) cmd_gios_data "$@" ;;
+  gios-index) cmd_gios_index "$@" ;;
+  om-current) cmd_om_current "$@" ;;
+  geocode) cmd_geocode "$@" ;;
+  *)      die "usage: inair-fetch nearby|postcode|point|id|air|sc-box|gios-stations|gios-sensors|gios-data|gios-index|om-current|geocode, arguments on stdin" ;;
 esac
