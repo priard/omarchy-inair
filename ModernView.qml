@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -15,8 +16,8 @@ Item {
 
   readonly property var air: panel ? panel.air : null
   readonly property var levelMeta: panel ? panel.levelMeta : Model.levelInfo("", "polish")
-  readonly property color levelColor: panel ? panel.levelInk : Color.muted
-  readonly property color foreground: panel ? panel.foreground : Color.popups.text
+  readonly property color levelColor: panel ? panel.levelInk : Commons.Color.muted
+  readonly property color foreground: panel ? panel.foreground : Commons.Color.popups.text
   readonly property color dim: panel ? panel.dim : Qt.darker(foreground, 1.5)
   readonly property color faint: panel ? panel.faint : Qt.darker(foreground, 1.9)
   readonly property string fontFamily: panel ? panel.fontFamily : Style.font.family

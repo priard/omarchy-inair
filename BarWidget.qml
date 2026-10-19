@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -53,16 +54,20 @@ BarWidget {
   }
 
   readonly property string label: panelLoader.item ? String(panelLoader.item.label) : ""
+  // Color is always qualified as Commons.Color: unqualified, the name does not
+  // resolve to the shell's palette in a plugin.
+  readonly property color barText: Commons.Color.bar.text
+  readonly property color barBackground: Commons.Color.bar.background
+
   readonly property color levelColor: panelLoader.item
-    ? panelLoader.item.levelColor : Color.bar.text
+    ? panelLoader.item.levelColor : barText
 
   // The index colours are GIOŚ's and the EEA's, picked for white maps; the bar
   // is whatever the theme makes it. Keep the hue and walk the colour toward
   // black or white just far enough to read against the bar actually behind it.
   // A mostly transparent bar sits over the wallpaper, which the plugin cannot
   // see, so it is judged against the theme background instead.
-  readonly property color barSurface: Color.bar.background.a >= 0.5
-    ? Color.bar.background : Color.background
+  readonly property color barSurface: barBackground.a >= 0.5 ? barBackground : Commons.Color.background
 
   readonly property bool hasReading: panelLoader.item ? panelLoader.item.hasReading === true : false
 
@@ -70,7 +75,7 @@ BarWidget {
   // is no index to colour it by, and a coloured dash would claim one.
   readonly property color pillColor: hasReading
     ? Model.readable(levelColor, barSurface, 3.5)
-    : Qt.rgba(Color.bar.text.r, Color.bar.text.g, Color.bar.text.b, 0.55)
+    : Qt.rgba(barText.r, barText.g, barText.b, 0.55)
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight

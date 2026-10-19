@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -20,7 +21,7 @@ Item {
 
   readonly property string fontFamily: panel ? panel.fontFamily : Style.font.family
   readonly property int fontSize: Style.font.body
-  readonly property color foreground: panel ? panel.foreground : Color.popups.text
+  readonly property color foreground: panel ? panel.foreground : Commons.Color.popups.text
   readonly property color dim: panel ? panel.dim : Qt.darker(foreground, 1.5)
   readonly property color faint: panel ? panel.faint : Qt.darker(foreground, 1.9)
   // The index colour as it reads on this theme's background, not as GIOŚ
