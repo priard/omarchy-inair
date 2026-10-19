@@ -181,3 +181,94 @@ test("GIOŚ: nothing within 30 km", () => {
   assert.equal(r.status, "No GIOŚ station within 30 km")
   assert.equal(Sources.plan("gios", r.state, far, NOW), null)
 })
+
+const NIDZICA = { place: { name: "Nidzica", latitude: 53.36, longitude: 20.427 }, locker: "" }
+
+test("InPost: nearest locker with a sensor, index only, from rounded coordinates", () => {
+  const step = Sources.plan("inpost", {}, NIDZICA, NOW)
+  assert.deepEqual({ op: step.op, input: step.input }, { op: "nearby", input: "53.360 20.427" })
+  const r = Sources.accept("inpost", {}, "nearby", fixture("shipx-nidzica.json"), NIDZICA, NOW)
+  const first = Model.parseNearby(fixture("shipx-nidzica.json"))[0]
+  assert.equal(r.state.code, first.code)
+  assert.equal(r.observation.kind, "index")
+  assert.equal(r.observation.level, first.level)
+  assert.equal(Object.keys(r.observation.readings).length, 0)
+  assert.ok(r.state.candidates.length >= 1)
+  assert.deepEqual(Sources.plan("inpost", r.state, NIDZICA, NOW).op, "point")
+})
+
+test("InPost: a pinned locker is looked up by code and never via the readings endpoint", () => {
+  const pinned = { place: null, locker: "NID01BAPP" }
+  const step = Sources.plan("inpost", {}, pinned, NOW)
+  assert.deepEqual({ op: step.op, input: step.input }, { op: "point", input: "NID01BAPP" })
+  const raw = JSON.stringify({ name: "NID01BAPP", air_index_level: "GOOD", address_details: { city: "Nidzica", street: "11 Listopada" },
+    location: { latitude: 53.36, longitude: 20.42 } })
+  const r = Sources.accept("inpost", {}, "point", raw, pinned, NOW)
+  assert.equal(r.observation.level, "GOOD")
+  assert.match(r.observation.place, /^NID01BAPP/)
+  for (let i = 0; i < 3; i++) assert.notEqual(Sources.plan("inpost", r.state, pinned, NOW).op, "air")
+  const none = Sources.accept("inpost", {}, "point", JSON.stringify({ name: "KRA80M", air_index_level: null }), pinned, NOW)
+  assert.equal(none.status, "KRA80M has no air sensor")
+})
+
+test("primary: first fresh source in priority order, stale ones fall through", () => {
+  const fresh = { source: "gios", at: NOW - 60 * 60000 }
+  const stale = { source: "sensorcommunity", at: NOW - 45 * 60000 }
+  assert.equal(Sources.primary(["sensorcommunity", "gios"], { sensorcommunity: stale, gios: fresh }, NOW), "gios")
+  assert.equal(Sources.primary(["sensorcommunity", "gios"], { sensorcommunity: stale }, NOW), "sensorcommunity")
+  assert.equal(Sources.primary(["sensorcommunity"], {}, NOW), "")
+})
+
+test("nextDelayMs: refresh floor, doubling backoff, 429 floor, 1 h cap", () => {
+  assert.equal(Sources.nextDelayMs("sensorcommunity", 0, 0, 5), 5 * 60000)
+  assert.equal(Sources.nextDelayMs("sensorcommunity", 0, 0, 10), 10 * 60000)
+  assert.equal(Sources.nextDelayMs("gios", 0, 0, 5), 20 * 60000)
+  assert.equal(Sources.nextDelayMs("sensorcommunity", 1, 0, 5), 10 * 60000)
+  assert.equal(Sources.nextDelayMs("sensorcommunity", 1, 429, 5), 15 * 60000)
+  assert.equal(Sources.nextDelayMs("gios", 5, 0, 5), 60 * 60000)
+})
+
+test("settingsFrom: defaults, explicit lists and the 0.8.x upgrade", () => {
+  // Arrays made inside the vm context have another realm's prototype, which
+  // deepStrictEqual would count as a difference; compare their JSON instead.
+  const json = (x) => JSON.parse(JSON.stringify(x))
+  assert.deepEqual(json(Sources.settingsFrom({})), { sources: ["sensorcommunity", "gios"], setupDone: false })
+  assert.deepEqual([...Sources.settingsFrom({ sources: ["gios", "bogus", "gios", "openmeteo"] }).sources], ["gios", "openmeteo"])
+  assert.deepEqual([...Sources.settingsFrom({ sources: [] }).sources], [])
+  const upgraded = Sources.settingsFrom({ locker: "KRA80M", resolvedCode: "KRA80M", resolvedId: "123" })
+  assert.deepEqual([...upgraded.sources], ["sensorcommunity", "gios", "inpost"])
+  assert.equal(upgraded.setupDone, false)
+  assert.equal(Sources.settingsFrom({ sources: ["gios"], setupDone: true }).setupDone, true)
+})
+
+test("places: stored place, geocoder results, postcode, locker codes", () => {
+  assert.deepEqual({ ...Sources.placeFrom({ name: "Dom <b>", latitude: 50.1, longitude: 19.9 }) },
+    { name: "Dom b", latitude: 50.1, longitude: 19.9 })
+  assert.equal(Sources.placeFrom({ name: "x", latitude: "50", longitude: 19 }), null)
+  const places = Sources.parsePlaces(fixture("geocode-nidzica.json"))
+  assert.equal(places.length, 1)
+  assert.equal(places[0].name, "Nidzica")
+  assert.match(places[0].detail, /warmińsko-mazurskie/)
+  assert.deepEqual([...Sources.parsePlaces("{}")], [])
+  const fromCode = Sources.placeFromPostcode(fixture("shipx-nidzica.json"), "13-100")
+  assert.equal(fromCode.name, "13-100")
+  assert.ok(Math.abs(fromCode.latitude - 53.36) < 0.2)
+  assert.equal(Sources.looksLikeLockerCode("kra80m"), true)
+  assert.equal(Sources.looksLikeLockerCode("NID01BAPP"), true)
+  assert.equal(Sources.looksLikeLockerCode("Kraków"), false)
+  assert.equal(Sources.looksLikeLockerCode("31-042"), false)
+})
+
+test("historyKey, describe and attribution", () => {
+  assert.equal(Sources.historyKey("sensorcommunity", {}, KRAKOW), "sc:50.06,19.94")
+  assert.equal(Sources.historyKey("gios", { station: { id: 400 } }, KRAKOW), "gios:400")
+  assert.equal(Sources.historyKey("gios", {}, KRAKOW), "")
+  assert.equal(Sources.historyKey("inpost", { code: "NID01BAPP" }, KRAKOW), "inpost:NID01BAPP")
+  const sc = { source: "sensorcommunity", kind: "measurement", at: NOW - 3 * 60000, count: 5, distance: 400, place: "" }
+  assert.deepEqual({ ...Sources.describe(sc, NOW) },
+    { title: "Sensor.Community · median of 5 sensors", detail: "400 m · 3 min ago" })
+  const om = { source: "openmeteo", kind: "model", at: NOW, count: null, distance: 5000, place: "" }
+  assert.equal(Sources.describe(om, NOW).title, "Open-Meteo · model, not a measurement")
+  assert.equal(Sources.attribution(["gios", "openmeteo"]), "Data: GIOŚ · CAMS / Open-Meteo (CC BY 4.0)")
+  assert.equal(Sources.attribution([]), "")
+})

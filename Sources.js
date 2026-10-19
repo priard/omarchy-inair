@@ -432,6 +432,198 @@ function giosAccept(state, op, raw, context, now) {
   return result(updated, observation, "", false)
 }
 
-// Filled in by the next task; until then InPost plans nothing.
-function inpostPlan(state, context) { return null }
-function inpostAccept(state, op, raw, context, now) { return result(state, null, "", false) }
+// ------------------------------------------------------------------ InPost
+
+function inpostObservation(point, readings, level) {
+  return {
+    source: "inpost",
+    kind: "index",
+    at: Date.now(),
+    place: point.code + " · " + Model.lockerTitle(point),
+    distance: point.distance,
+    count: null,
+    level: level || point.level || "",
+    readings: readings || Object.create(null),
+    members: []
+  }
+}
+
+function inpostPlan(state, context) {
+  if (!state.code) {
+    if (context.locker) return { op: "point", input: context.locker, state: state }
+    if (!Model.validPlace(context.place)) return null
+    return {
+      op: "nearby",
+      input: Model.roundCoord(context.place.latitude) + " " + Model.roundCoord(context.place.longitude),
+      state: state
+    }
+  }
+  if (INPOST_ADVANCED) {
+    if (!state.lockerId) return { op: "id", input: Model.lockerPageSlug(state.point), state: state }
+    return { op: "air", input: state.lockerId + " " + state.code, state: state }
+  }
+  return { op: "point", input: state.code, state: state }
+}
+
+function inpostAccept(state, op, raw, context, now) {
+  if (op === "nearby") {
+    var found = Model.parseNearby(raw, 24)
+    if (found.length === 0) return result(state, null, "No InPost locker with an air sensor nearby", false)
+    var nearest = found[0]
+    return result({ code: nearest.code, point: nearest, candidates: found }, inpostObservation(nearest), "", false)
+  }
+  if (op === "point") {
+    var point = Model.parsePoint(raw)
+    var asked = Model.plain(context.locker || state.code, 32)
+    if (!point) return result(state, null, "No locker called " + asked, false)
+    if (!point.hasSensor) return result(state, null, point.code + " has no air sensor", false)
+    // A lookup by code carries no distance; keep the one the search found, or
+    // measure it from the place when there is one.
+    var known = (state.candidates || []).filter(function(c) { return c.code === point.code })[0]
+    if (known) point.distance = known.distance
+    else if (Model.validPlace(context.place) && point.latitude !== null && point.longitude !== null)
+      point.distance = Model.distanceMetres(context.place.latitude, context.place.longitude, point.latitude, point.longitude)
+    return result(copy(state, { code: point.code, point: point }), inpostObservation(point), "", false)
+  }
+  if (op === "id") {
+    var parsed = parseJson(raw)
+    var id = parsed ? Model.plain(parsed.id, 12) : ""
+    if (!/^[0-9]{1,12}$/.test(id)) return result(state, null, "InPost: no sensor id on the locker page", false)
+    return result(copy(state, { lockerId: id }), null, "", true)
+  }
+  if (op === "air") {
+    var air = Model.parseAirResponse(raw)
+    if (!air) return unexpected("inpost", state)
+    return result(state, inpostObservation(state.point, air.readings, air.level), "", false)
+  }
+  return result(state, null, "", false)
+}
+
+// -------------------------------------------------------------- selection
+
+function isFresh(observation, now) {
+  var meta = observation ? info(observation.source) : null
+  return !!meta && typeof observation.at === "number" && now - observation.at <= meta.staleAfterMinutes * 60000
+}
+
+// The pill reads the first enabled source with fresh data; a source that has
+// gone quiet hands over to the next one. When every source is stale, the
+// first one with anything at all still beats a dash.
+function primary(order, observations, now) {
+  var i
+  for (i = 0; i < order.length; i++) if (isFresh(observations[order[i]], now)) return order[i]
+  for (i = 0; i < order.length; i++) if (observations[order[i]]) return order[i]
+  return ""
+}
+
+var MINUTE = 60000
+
+function nextDelayMs(id, failures, http, refreshMinutes) {
+  var meta = info(id)
+  var base = Math.max(refreshMinutes || 5, meta ? meta.minRefreshMinutes : 5) * MINUTE
+  var delay = failures > 0 ? Math.min(base * Math.pow(2, failures), 60 * MINUTE) : base
+  if (http === 429) delay = Math.max(delay, 15 * MINUTE)
+  return delay
+}
+
+// --------------------------------------------------------------- settings
+
+function normalizeSources(list) {
+  var out = []
+  for (var i = 0; i < (Array.isArray(list) ? Math.min(list.length, 16) : 0); i++) {
+    var id = String(list[i])
+    if (info(id) && out.indexOf(id) < 0) out.push(id)
+  }
+  return out
+}
+
+// Before 0.9.0 there was no `sources` key: anyone who had a locker pinned or
+// resolved used InPost, so they start the wizard with it still selected.
+function settingsFrom(entry) {
+  var e = entry || {}
+  var setupDone = e.setupDone === true
+  if (Array.isArray(e.sources)) return { sources: normalizeSources(e.sources), setupDone: setupDone }
+  var legacy = Model.plain(e.locker, 32) !== "" || Model.plain(e.resolvedCode, 32) !== ""
+  return {
+    sources: legacy ? ["sensorcommunity", "gios", "inpost"] : DEFAULT_SOURCES.slice(),
+    setupDone: setupDone
+  }
+}
+
+function placeFrom(object) {
+  if (!object || typeof object !== "object") return null
+  var place = {
+    name: Model.plain(object.name, 48),
+    latitude: object.latitude,
+    longitude: object.longitude
+  }
+  return Model.validPlace(place) ? place : null
+}
+
+function parsePlaces(raw) {
+  var data = parseJson(raw)
+  var list = data && Array.isArray(data.results) ? data.results : []
+  var out = []
+  for (var i = 0; i < list.length && out.length < 5; i++) {
+    var r = list[i]
+    if (!r || typeof r !== "object") continue
+    var place = placeFrom({ name: r.name, latitude: Model.finiteOr(r.latitude, null), longitude: Model.finiteOr(r.longitude, null) })
+    if (!place) continue
+    var detail = [Model.plain(r.admin1, 48), Model.plain(r.country, 32)].filter(function(s) { return s !== "" })
+    place.detail = detail.join(", ")
+    out.push(place)
+  }
+  return out
+}
+
+// A postcode becomes a place through ShipX: the nearest parcel point to it is
+// close enough to the middle of a Polish postcode area, and it needs no
+// geocoder.
+function placeFromPostcode(raw, postcode) {
+  var data = parseJson(raw)
+  var items = data && Array.isArray(data.items) ? data.items : []
+  for (var i = 0; i < Math.min(items.length, 50); i++) {
+    var point = Model.normalizePoint(items[i])
+    if (point && point.latitude !== null && point.longitude !== null)
+      return placeFrom({ name: Model.normalizePostcode(postcode), latitude: point.latitude, longitude: point.longitude })
+  }
+  return null
+}
+
+// Three letters, two digits, then a few more: KRA80M, NID01BAPP. Place names
+// have no digits, postcodes start with them.
+function looksLikeLockerCode(text) {
+  return /^[A-Za-z]{3}[0-9]{2}[A-Za-z0-9]{0,8}$/.test(String(text || "").replace(/^\s+|\s+$/g, ""))
+}
+
+// ---------------------------------------------------------------- display
+
+function historyKey(id, state, context) {
+  var place = context ? context.place : null
+  var around = Model.validPlace(place) ? place.latitude.toFixed(2) + "," + place.longitude.toFixed(2) : ""
+  if (id === "sensorcommunity") return around ? "sc:" + around : ""
+  if (id === "openmeteo") return around ? "om:" + around : ""
+  if (id === "gios") return state && state.station ? "gios:" + state.station.id : ""
+  if (id === "inpost") return state && state.code ? "inpost:" + state.code : ""
+  return ""
+}
+
+// The "from where" line under the hero, as a title and a detail.
+function describe(observation, now) {
+  if (!observation) return { title: "", detail: "" }
+  var meta = info(observation.source)
+  var what = observation.kind === "model" ? "model, not a measurement"
+    : (observation.count ? "median of " + observation.count + (observation.count === 1 ? " sensor" : " sensors")
+       : observation.place)
+  var detail = []
+  if (observation.distance !== null && observation.distance !== undefined)
+    detail.push((observation.kind === "model" ? "~" : "") + Model.formatDistance(observation.distance))
+  detail.push(Model.relativeTime(observation.at, now))
+  return { title: meta.label + (what ? " · " + what : ""), detail: detail.join(" · ") }
+}
+
+function attribution(order) {
+  var names = []
+  for (var i = 0; i < order.length; i++) if (info(order[i])) names.push(info(order[i]).attribution)
+  return names.length ? "Data: " + names.join(" · ") : ""
+}
