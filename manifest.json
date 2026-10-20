@@ -5,7 +5,7 @@
   "version": "0.9.0",
   "author": "priard",
   "license": "MIT",
-  "description": "Street-level air quality on your bar from Sensor.Community, GIOŚ, Open-Meteo and InPost, with a place search and a first-run wizard. Unofficial; not affiliated with any data provider.",
+  "description": "Air quality anywhere in the world on your bar: Open-Meteo everywhere, Sensor.Community street sensors, and GIOŚ and InPost in Poland, with weather, a place search and a first-run wizard. Unofficial; not affiliated with any data provider.",
   "repository": "https://github.com/priard/omarchy-inair",
   "kinds": [
     "bar-widget"
@@ -21,7 +21,6 @@
     "defaultSection": "center",
     "defaults": {
       "locker": "",
-      "index": "polish",
       "style": "terminal",
       "refreshMinutes": 5
     },
@@ -34,7 +33,7 @@
       {
         "key": "index",
         "type": "string",
-        "label": "Index scale: polish or european"
+        "label": "Index scale: polish or european (empty = polish for GIOŚ and InPost, european otherwise)"
       },
       {
         "key": "style",

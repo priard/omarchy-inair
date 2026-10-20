@@ -26,12 +26,21 @@ location.
 |---|---|---|---|---|
 | **Sensor.Community** | citizen low-cost sensors on balconies and lamp posts | every 5 min | PM1*, PM2.5, PM10, temperature, humidity, pressure: the median of the nearest five sites | your coordinates, rounded to ~100 m |
 | **GIOŚ** | Poland's official monitoring stations | hourly, 1–2 h behind | PM2.5, PM10 and the official Polish index from the nearest station within 30 km | nothing: inAir downloads the whole station list and picks the nearest one itself |
-| **Open-Meteo** | the CAMS air quality **model**, on an ~11 km grid | every 15 min | PM2.5 and PM10 as modelled, not measured, plus temperature, humidity and pressure from its weather forecast | your coordinates, rounded to ~100 m |
+| **Open-Meteo** | the CAMS air quality **model**, ~11 km grid in Europe, ~45 km elsewhere | every 15 min | PM2.5 and PM10 as modelled, not measured, plus temperature, humidity and pressure from its weather forecast | your coordinates, rounded to ~100 m |
 | **InPost** | the sensor on the nearest parcel locker | every few minutes | the locker's index level only (see below) | your coordinates, rounded to ~100 m |
 
 \* PM1 comes only from sensors that measure it (SPS30).
 
-None of them needs an account or a key. Sensor.Community is the default. Sensor.Community is closest to the street but uses cheap sensors that
+None of them needs an account or a key.
+
+**Outside Poland**, two of the four work: Open-Meteo everywhere on Earth, and
+Sensor.Community wherever volunteers have put up sensors — dense across most of
+Europe, sparse or absent in much of the Americas, Asia and Africa. GIOŚ and
+InPost are Polish; InPost ignores lockers more than 10 km away. Open-Meteo is
+the default because it always has an answer. Free global networks with more
+coverage (OpenAQ, WAQI) all require an API key, which inAir does not ask for.
+
+Sensor.Community is closest to the street but uses cheap sensors that
 read high in fog; GIOŚ is the reference but far between and an hour or two
 behind; Open-Meteo works anywhere but is a model, and inAir says so wherever it
 shows it.
@@ -244,22 +253,23 @@ Most of it is in the panel (`o`). Settings live in the widget's entry in
 file by hand or use `omarchy bar set`:
 
 ```bash
+omarchy bar set priard.inair sources gios      # or sensorcommunity, openmeteo, inpost
 omarchy bar set priard.inair index european
 omarchy bar set priard.inair style plain
 omarchy bar set priard.inair locker KRA80M   # pin an InPost locker
 ```
 
 ```json
-{ "id": "priard.inair", "sources": ["sensorcommunity", "gios"], "place": { "name": "Kraków", "latitude": 50.06, "longitude": 19.94 }, "setupDone": true, "index": "polish", "style": "terminal", "refreshMinutes": 5 }
+{ "id": "priard.inair", "sources": ["gios"], "place": { "name": "Kraków", "latitude": 50.06, "longitude": 19.94 }, "setupDone": true, "index": "polish", "style": "terminal", "refreshMinutes": 5 }
 ```
 
 | Key | Default | Meaning |
 |---|---|---|
-| `sources` | `["sensorcommunity"]` | The chosen source, as a one-item list: `sensorcommunity`, `gios`, `openmeteo` or `inpost`. A longer list (0.9 betas) keeps its first item. |
+| `sources` | `["openmeteo"]` | The chosen source, as a one-item list (or a plain string): `sensorcommunity`, `gios`, `openmeteo` or `inpost`. A longer list (0.9 betas) keeps its first item. |
 | `place` | none | Where to read: `{ name, latitude, longitude }`. Without it, the Weather widget's location. |
 | `setupDone` | `false` | Whether the first-run wizard has been through. |
 | `locker` | `""` | InPost locker to pin, e.g. `"KRA80M"`. Empty follows the nearest one with a sensor. |
-| `index` | `"polish"` | `"polish"` for the GIOŚ scale, `"european"` for the EEA one. |
+| `index` | by source | `"polish"` for the GIOŚ scale, `"european"` for the EEA one. Unset, GIOŚ and InPost use the Polish scale and the others the EEA one. |
 | `style` | `"terminal"` | `"terminal"` for the character-grid skin, `"plain"` for ordinary widgets. |
 | `refreshMinutes` | `5` | How often to refresh, clamped to 1–60; no source is asked more often than it updates. |
 

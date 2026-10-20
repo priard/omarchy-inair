@@ -44,7 +44,7 @@ var SOURCES = {
     hint: "model and weather",
     label: "Open-Meteo",
     kind: "model",
-    blurb: "CAMS forecast model on an ~11 km grid, not a measurement; weather from its forecast",
+    blurb: "CAMS forecast model, ~11 km grid in Europe and ~45 km elsewhere, not a measurement; weather from its forecast",
     hosts: ["air-quality-api.open-meteo.com", "api.open-meteo.com"],
     attribution: "CAMS / Open-Meteo (CC BY 4.0)",
     minRefreshMinutes: 15,
@@ -64,7 +64,9 @@ var SOURCES = {
 }
 
 var ORDER = ["sensorcommunity", "gios", "openmeteo", "inpost"]
-var DEFAULT_SOURCES = ["sensorcommunity"]
+// The only one that has an answer everywhere: Sensor.Community is dense in
+// Europe and thin elsewhere, GIOŚ and InPost are Polish.
+var DEFAULT_SOURCES = ["openmeteo"]
 
 function info(id) {
   return Object.prototype.hasOwnProperty.call(SOURCES, id) ? SOURCES[id] : null
@@ -222,7 +224,7 @@ function scAccept(state, raw, context, now) {
     return result(copy(state, { radius: radius + 1 }), null, "", true)
   if (!lead) {
     return result(copy(state, { radius: radius }), null,
-      "No Sensor.Community sensor within " + SC_RADII_KM[SC_RADII_KM.length - 1] + " km", false)
+      "No Sensor.Community sensor within " + SC_RADII_KM[SC_RADII_KM.length - 1] + " km; Open-Meteo works anywhere", false)
   }
 
   var newest = 0
@@ -513,6 +515,8 @@ function giosAccept(state, op, raw, context, now) {
 
 // ------------------------------------------------------------------ InPost
 
+var INPOST_RANGE_M = 10000
+
 function inpostObservation(point, readings, level) {
   return {
     source: "inpost",
@@ -546,8 +550,11 @@ function inpostPlan(state, context) {
 
 function inpostAccept(state, op, raw, context, now) {
   if (op === "nearby") {
-    var found = Model.parseNearby(raw, 24)
-    if (found.length === 0) return result(state, null, "No InPost locker with an air sensor nearby", false)
+    // The search always returns the nearest lockers, even from New York, where
+    // they are in Poland.
+    var found = Model.parseNearby(raw, 24).filter(function(p) { return p.distance !== null && p.distance <= INPOST_RANGE_M })
+    if (found.length === 0)
+      return result(state, null, "No InPost locker with an air sensor within " + INPOST_RANGE_M / 1000 + " km", false)
     var nearest = found[0]
     return result({ code: nearest.code, point: nearest, candidates: found }, inpostObservation(nearest), "", false)
   }
@@ -621,6 +628,7 @@ function normalizeSources(list) {
 function settingsFrom(entry) {
   var e = entry || {}
   var setupDone = e.setupDone === true
+  if (typeof e.sources === "string") e = copy(e, { sources: [e.sources] })
   if (Array.isArray(e.sources)) return { sources: normalizeSources(e.sources).slice(0, 1), setupDone: setupDone }
   var legacy = Model.plain(e.locker, 32) !== "" || Model.plain(e.resolvedCode, 32) !== ""
   return {

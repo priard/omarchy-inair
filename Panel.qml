@@ -102,8 +102,13 @@ Panel {
 
   // A pinned code holds one InPost locker; empty means the nearest one.
   readonly property string pinnedCode: Model.plain(entryValue("locker", ""), 32)
-  readonly property string scale:
-    String(entryValue("index", "polish")) === "european" ? "european" : "polish"
+  // Unset, the scale follows the source: the Polish one for the Polish sources,
+  // the EEA one for everyone else.
+  readonly property string scale: {
+    var set = String(entryValue("index", ""))
+    if (set === "european" || set === "polish") return set
+    return primaryId === "gios" || primaryId === "inpost" ? "polish" : "european"
+  }
 
   // Which skin draws the panel. "terminal" is the character-grid one; "plain"
   // is the same content in ordinary widgets, for anyone who does not want a

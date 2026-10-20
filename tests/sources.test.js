@@ -76,7 +76,7 @@ test("Sensor.Community widens the box, then gives up with a status", () => {
   r = Sources.accept("sensorcommunity", { radius: 2 }, "sc-box", "[]", KRAKOW, NOW)
   assert.equal(r.again, false)
   assert.equal(r.observation, null)
-  assert.equal(r.status, "No Sensor.Community sensor within 10 km")
+  assert.equal(r.status, "No Sensor.Community sensor within 10 km; Open-Meteo works anywhere")
 })
 
 test("Sensor.Community survives garbage", () => {
@@ -219,6 +219,14 @@ test("InPost: nearest locker with a sensor, index only, from rounded coordinates
   assert.deepEqual(Sources.plan("inpost", r.state, NIDZICA, NOW).op, "point")
 })
 
+test("InPost: a locker thousands of km away is not your air", () => {
+  const newYork = { place: { name: "New York", latitude: 40.713, longitude: -74.006 }, locker: "" }
+  const far = fixture("shipx-nidzica.json").replace(/"distance":\s*\d+/g, '"distance": 6373552')
+  const r = Sources.accept("inpost", {}, "nearby", far, newYork, NOW)
+  assert.equal(r.observation, null)
+  assert.equal(r.status, "No InPost locker with an air sensor within 10 km")
+})
+
 test("InPost: a pinned locker is looked up by code and never via the readings endpoint", () => {
   const pinned = { place: null, locker: "NID01BAPP" }
   const step = Sources.plan("inpost", {}, pinned, NOW)
@@ -252,7 +260,9 @@ test("settingsFrom: one source, the 0.9 lists and the 0.8.x upgrade", () => {
   // Arrays made inside the vm context have another realm's prototype, which
   // deepStrictEqual would count as a difference; compare their JSON instead.
   const json = (x) => JSON.parse(JSON.stringify(x))
-  assert.deepEqual(json(Sources.settingsFrom({})), { sources: ["sensorcommunity"], setupDone: false })
+  assert.deepEqual(json(Sources.settingsFrom({})), { sources: ["openmeteo"], setupDone: false })
+  // `omarchy bar set priard.inair sources gios` stores a plain string.
+  assert.deepEqual([...Sources.settingsFrom({ sources: "gios" }).sources], ["gios"])
   assert.deepEqual([...Sources.settingsFrom({ sources: ["bogus", "gios", "openmeteo"] }).sources], ["gios"])
   assert.deepEqual([...Sources.settingsFrom({ sources: [] }).sources], [])
   const upgraded = Sources.settingsFrom({ locker: "KRA80M", resolvedCode: "KRA80M", resolvedId: "123" })

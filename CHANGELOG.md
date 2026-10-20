@@ -14,6 +14,13 @@ All notable changes to this plugin. The format follows
   model, with temperature, humidity and pressure from its weather forecast).
   None needs a key. One source at a time: press 1–4 in the panel, or click
   one, to switch; the choice is saved, and only the chosen source is asked.
+- **Works outside Poland.** Open-Meteo, now the default, answers anywhere;
+  Sensor.Community wherever there are sensors. InPost no longer shows a
+  Polish locker to someone in New York (10 km limit), and the index scale
+  follows the source unless you set one: Polish for GIOŚ and InPost, EEA for
+  the rest.
+- `omarchy bar set priard.inair sources gios` chooses the source from a
+  terminal.
 - **A trend for InPost again.** InPost publishes only an index now, so its
   trend draws the index level instead of PM2.5.
 - **Place search.** `/` takes a town or district (Open-Meteo's geocoder), a
