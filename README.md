@@ -275,6 +275,18 @@ omarchy bar set priard.inair locker KRA80M   # pin an InPost locker
 
 `resolvedCode` and `resolvedId` may remain from 0.8; 0.9 no longer uses them.
 
+## Languages
+
+inAir speaks English and Polish, and follows the language Omarchy is set to
+(`omarchy language`, or Setup > Language). A switch takes effect at once,
+without a restart. On an Omarchy older than 4.5, which has no translations
+for plugins, it stays in English.
+
+The words live in `i18n/`, one flat JSON file per language. To add one, copy
+`i18n/en.json` to `i18n/<code>.json`, translate the values and keep the `%1`
+holes; `node --test tests/` checks that every key is there. A string missing
+from a translation falls back to English.
+
 ## What it talks to, and what it writes
 
 Public endpoints only. No account, no API key, no credential of any kind:

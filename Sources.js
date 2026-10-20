@@ -10,6 +10,7 @@
 //   { source, kind, at, place, distance, count, level, readings, members }
 // `readings` is Model.buildReadings' map, `level` a level key or "" when the
 // source publishes no verdict of its own (the panel computes one from PM).
+// A status is "" or a Model.msg, worded when it is shown.
 
 // InPost's readings endpoint has refused automated requests since
 // 7 October 2026. The code that read it stays, switched off, so the readings
@@ -93,7 +94,7 @@ function result(state, observation, status, again) {
 }
 
 function unexpected(id, state) {
-  return result(state, null, info(id).label + ": unexpected response", false)
+  return result(state, null, Model.msg("status.unexpected", "%1: unexpected response", [info(id).label]), false)
 }
 
 // ------------------------------------------------------ Sensor.Community
@@ -224,7 +225,8 @@ function scAccept(state, raw, context, now) {
     return result(copy(state, { radius: radius + 1 }), null, "", true)
   if (!lead) {
     return result(copy(state, { radius: radius }), null,
-      "No Sensor.Community sensor within " + SC_RADII_KM[SC_RADII_KM.length - 1] + " km; Open-Meteo works anywhere", false)
+      Model.msg("status.sc.none", "No Sensor.Community sensor within %1 km; Open-Meteo works anywhere",
+        [SC_RADII_KM[SC_RADII_KM.length - 1]]), false)
   }
 
   var newest = 0
@@ -269,7 +271,7 @@ function omAccept(state, op, raw, context, now) {
     pm25: Model.finiteOr(data.current.pm2_5, null),
     pm10: Model.finiteOr(data.current.pm10, null)
   })
-  if (!readings.pm25 && !readings.pm10) return result(state, null, "Open-Meteo has no data for this place", false)
+  if (!readings.pm25 && !readings.pm10) return result(state, null, Model.msg("status.om.none", "Open-Meteo has no data for this place"), false)
   var lat = Model.finiteOr(data.latitude, null)
   var lon = Model.finiteOr(data.longitude, null)
   var observation = {
@@ -441,8 +443,9 @@ function giosNextStation(state, manual, now) {
   var after = { stations: rest, station: rest[0] || null }
   if (!after.station) {
     after.exhaustedAt = now || Date.now()
-    return result(after, null, manual ? "No GIOŚ station with live PM data within 30 km"
-                                      : "No GIOŚ station with PM measurements within 30 km", false)
+    return result(after, null, manual
+    ? Model.msg("status.gios.noLive", "No GIOŚ station with live PM data within %1 km", [GIOS_RANGE_M / 1000])
+    : Model.msg("status.gios.noPm", "No GIOŚ station with PM measurements within %1 km", [GIOS_RANGE_M / 1000]), false)
   }
   return result(after, null, "", true)
 }
@@ -473,7 +476,7 @@ function giosAccept(state, op, raw, context, now) {
     var next = { stations: stations, station: stations[0] || null }
     if (!next.station) {
       next.exhaustedAt = now || Date.now()
-      return result(next, null, "No GIOŚ station within 30 km", false)
+      return result(next, null, Model.msg("status.gios.none", "No GIOŚ station within %1 km", [GIOS_RANGE_M / 1000]), false)
     }
     return result(next, null, "", true)
   }
@@ -509,7 +512,7 @@ function giosAccept(state, op, raw, context, now) {
 
   var observation = giosObservation(updated)
   if (!observation)
-    return result(updated, null, "GIOŚ: " + updated.station.name + " published no PM readings in the last hours", false)
+    return result(updated, null, Model.msg("status.gios.quiet", "GIOŚ: %1 published no PM readings in the last hours", [updated.station.name]), false)
   return result(updated, observation, "", false)
 }
 
@@ -554,15 +557,15 @@ function inpostAccept(state, op, raw, context, now) {
     // they are in Poland.
     var found = Model.parseNearby(raw, 24).filter(function(p) { return p.distance !== null && p.distance <= INPOST_RANGE_M })
     if (found.length === 0)
-      return result(state, null, "No InPost locker with an air sensor within " + INPOST_RANGE_M / 1000 + " km", false)
+      return result(state, null, Model.msg("status.inpost.none", "No InPost locker with an air sensor within %1 km", [INPOST_RANGE_M / 1000]), false)
     var nearest = found[0]
     return result({ code: nearest.code, point: nearest, candidates: found }, inpostObservation(nearest), "", false)
   }
   if (op === "point") {
     var point = Model.parsePoint(raw)
     var asked = Model.plain(context.locker || state.code, 32)
-    if (!point) return result(state, null, "No locker called " + asked, false)
-    if (!point.hasSensor) return result(state, null, point.code + " has no air sensor", false)
+    if (!point) return result(state, null, Model.msg("status.inpost.unknown", "No locker called %1", [asked]), false)
+    if (!point.hasSensor) return result(state, null, Model.msg("status.inpost.noSensor", "%1 has no air sensor", [point.code]), false)
     // A lookup by code carries no distance; keep the one the search found, or
     // measure it from the place when there is one.
     var known = (state.candidates || []).filter(function(c) { return c.code === point.code })[0]
@@ -574,7 +577,7 @@ function inpostAccept(state, op, raw, context, now) {
   if (op === "id") {
     var parsed = parseJson(raw)
     var id = parsed ? Model.plain(parsed.id, 12) : ""
-    if (!/^[0-9]{1,12}$/.test(id)) return result(state, null, "InPost: no sensor id on the locker page", false)
+    if (!/^[0-9]{1,12}$/.test(id)) return result(state, null, Model.msg("status.inpost.noId", "InPost: no sensor id on the locker page"), false)
     return result(copy(state, { lockerId: id }), null, "", true)
   }
   if (op === "air") {
@@ -696,21 +699,22 @@ function historyKey(id, state, context) {
 }
 
 // The "from where" line under the hero, as a title and a detail.
-function describe(observation, now) {
+function describe(observation, now, tr) {
   if (!observation) return { title: "", detail: "" }
   var meta = info(observation.source)
-  var what = observation.kind === "model" ? "model, not a measurement"
-    : (observation.count ? "median of " + observation.count + (observation.count === 1 ? " sensor" : " sensors")
+  var w = Model.words(tr)
+  var what = observation.kind === "model" ? w.t("describe.model", "model, not a measurement")
+    : (observation.count ? w.tn("describe.median", observation.count, "median of %1 sensor", "median of %1 sensors")
        : observation.place)
   var detail = []
   if (observation.distance !== null && observation.distance !== undefined)
     detail.push((observation.kind === "model" ? "~" : "") + Model.formatDistance(observation.distance))
-  detail.push(Model.relativeTime(observation.at, now))
+  detail.push(Model.relativeTime(observation.at, now, tr))
   return { title: meta.label + (what ? " · " + what : ""), detail: detail.join(" · ") }
 }
 
-function attribution(order) {
+function attribution(order, tr) {
   var names = []
   for (var i = 0; i < order.length; i++) if (info(order[i])) names.push(info(order[i]).attribution)
-  return names.length ? "Data: " + names.join(" · ") : ""
+  return names.length ? Model.words(tr).t("panel.data", "Data: %1", [names.join(" · ")]) : ""
 }

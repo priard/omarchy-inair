@@ -12,6 +12,37 @@
 //   3. POST inpost.pl/shipx-point-data/<id>/<code>/air_index_level
 //      The actual readings. Needs the numeric id from step 2.
 
+// ------------------------------------------------------------ languages
+
+// Words for the screen are written here in English, each with a key into
+// i18n/<language>.json. `tr` is the panel's translator (t, tn); without one,
+// in the tests or on an Omarchy older than 4.5, the English is used as is.
+function fill(text, args) {
+  return String(text).replace(/%(\d)/g, function(m, n) {
+    var v = (args || [])[n - 1]
+    return v === undefined ? m : String(v)
+  })
+}
+
+var ENGLISH = {
+  t: function(key, text, args) { return fill(text, args) },
+  tn: function(key, count, one, other, args) { return fill(count === 1 ? one : other, [count].concat(args || [])) }
+}
+
+function words(tr) { return tr || ENGLISH }
+
+// A message kept for later, a status say, so it is worded in whatever
+// language is on when it is shown rather than when it was made.
+function msg(key, text, args) {
+  return { key: key, en: text, args: args || [], text: fill(text, args) }
+}
+
+function say(tr, message) {
+  if (!message) return ""
+  if (typeof message !== "object") return String(message)
+  return words(tr).t(message.key, message.en, message.args)
+}
+
 // ---------------------------------------------------------------- helpers
 
 var POLISH_CHARS = {
@@ -110,9 +141,13 @@ function canonicalLevel(level) {
   return LEVEL_ALIASES[key] || key
 }
 
-function levelInfo(level, scale) {
-  var table = String(scale || "polish") === "european" ? EU_LEVELS : LEVELS
-  return table[canonicalLevel(level)] || UNKNOWN_LEVEL
+function levelInfo(level, scale, tr) {
+  var named = String(scale || "polish") === "european" ? "european" : "polish"
+  var key = canonicalLevel(level)
+  var info = (named === "european" ? EU_LEVELS : LEVELS)[key] || UNKNOWN_LEVEL
+  if (!tr) return info
+  var base = info === UNKNOWN_LEVEL ? "level.none" : "level." + named + "." + key
+  return { rank: info.rank, color: info.color, label: tr.t(base, info.label), short: tr.t(base + ".short", info.short) }
 }
 
 // ------------------------------------------------------- sensor parsing
@@ -484,11 +519,11 @@ function parseLocalTime(text) {
 // The pill: a gear before anything is set up, PM2.5 when the source measures
 // it, the short level when it only publishes an index (InPost), a dash when
 // nothing has answered yet.
-function pillLabel(observation, setupNeeded) {
+function pillLabel(observation, setupNeeded, tr) {
   if (setupNeeded) return "󰵃 ⚙"
   var number = pillText(observation)
   if (number !== "") return "󰵃 " + number
-  if (observation && observation.level) return "󰵃 " + levelInfo(observation.level, "polish").short
+  if (observation && observation.level) return "󰵃 " + levelInfo(observation.level, "polish", tr).short
   return "󰵃 —"
 }
 
@@ -498,17 +533,17 @@ function sourceFailure(label, exitCode, stderrText) {
   var who = plain(label, 32)
   if (exitCode === 22) {
     var http = httpStatusIn(stderrText)
-    if (http === 403) return who + " refused the request (HTTP 403)"
-    if (http === 404) return who + " has nothing at that address (HTTP 404)"
-    if (http === 429) return who + " is limiting requests (HTTP 429); trying again later"
-    if (http >= 500) return who + "'s server is failing (HTTP " + http + "); trying again later"
-    if (http > 0) return who + " answered HTTP " + http
-    return who + " refused the request"
+    if (http === 403) return msg("fail.403", "%1 refused the request (HTTP 403)", [who])
+    if (http === 404) return msg("fail.404", "%1 has nothing at that address (HTTP 404)", [who])
+    if (http === 429) return msg("fail.429", "%1 is limiting requests (HTTP 429); trying again later", [who])
+    if (http >= 500) return msg("fail.5xx", "%1's server is failing (HTTP %2); trying again later", [who, http])
+    if (http > 0) return msg("fail.http", "%1 answered HTTP %2", [who, http])
+    return msg("fail.refused", "%1 refused the request", [who])
   }
-  if (exitCode === 6) return "Cannot resolve " + who + " — is the network up?"
-  if (exitCode === 7) return "Cannot connect to " + who
-  if (exitCode === 28 || exitCode === 124 || exitCode === 137) return who + " did not answer in time"
-  return who + " is unreachable"
+  if (exitCode === 6) return msg("fail.dns", "Cannot resolve %1 — is the network up?", [who])
+  if (exitCode === 7) return msg("fail.connect", "Cannot connect to %1", [who])
+  if (exitCode === 28 || exitCode === 124 || exitCode === 137) return msg("fail.timeout", "%1 did not answer in time", [who])
+  return msg("fail.unreachable", "%1 is unreachable", [who])
 }
 
 // The panel shows a click at once, as an override, and writes it through the
@@ -997,12 +1032,13 @@ function clockTime(date) {
 }
 
 // "last 40 min", "last 5 h", "last 24 h".
-function spanLabel(ms) {
+function spanLabel(ms, tr) {
   if (!ms || ms <= 0) return ""
   var minutes = Math.max(1, Math.round(ms / 60000))
-  if (minutes < 60) return "last " + minutes + " min"
+  if (minutes < 60) return words(tr).t("time.lastMinutes", "last %1 min", [minutes])
   var hours = minutes / 60
-  return "last " + (hours < 10 ? formatValue(hours, hours % 1 === 0 ? 0 : 1) : String(Math.round(hours))) + " h"
+  return words(tr).t("time.lastHours", "last %1 h",
+    [hours < 10 ? formatValue(hours, hours % 1 === 0 ? 0 : 1) : String(Math.round(hours))])
 }
 
 // ↑ ↓ → between the oldest and newest of the recent readings, with a dead
@@ -1061,18 +1097,23 @@ function airFlowRows(tick, cols, rows, density) {
   return out
 }
 
-function relativeTime(then, now) {
+function relativeTime(then, now, tr) {
   if (!then) return ""
   var seconds = Math.max(0, Math.round(((now || new Date()) - then) / 1000))
-  if (seconds < 60) return "just now"
+  if (seconds < 60) return words(tr).t("time.justNow", "just now")
   var minutes = Math.round(seconds / 60)
-  if (minutes < 60) return minutes + " min ago"
+  if (minutes < 60) return words(tr).t("time.minutesAgo", "%1 min ago", [minutes])
   var hours = Math.round(minutes / 60)
-  return hours + " h ago"
+  return words(tr).t("time.hoursAgo", "%1 h ago", [hours])
 }
 
 if (typeof module !== "undefined") {
   module.exports = {
+    fill: fill,
+    words: words,
+    msg: msg,
+    say: say,
+    UNKNOWN_LEVEL: UNKNOWN_LEVEL,
     slugify: slugify,
     plain: plain,
     finiteOr: finiteOr,

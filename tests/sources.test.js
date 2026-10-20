@@ -41,7 +41,7 @@ test("Sensor.Community: median of the five nearest, newest sample per field", ()
     scEntry(8, 11, 50.0601, 19.9401, "2026-10-19 14:24:00", { temperature: 11, humidity: 80, pressure: 100300 })
   ])
   const r = Sources.accept("sensorcommunity", {}, "sc-box", raw, KRAKOW, NOW)
-  assert.equal(r.status, "")
+  assert.equal(Model.say(null, r.status), "")
   assert.equal(r.again, false)
   const o = r.observation
   assert.equal(o.source, "sensorcommunity")
@@ -76,7 +76,7 @@ test("Sensor.Community widens the box, then gives up with a status", () => {
   r = Sources.accept("sensorcommunity", { radius: 2 }, "sc-box", "[]", KRAKOW, NOW)
   assert.equal(r.again, false)
   assert.equal(r.observation, null)
-  assert.equal(r.status, "No Sensor.Community sensor within 10 km; Open-Meteo works anywhere")
+  assert.equal(Model.say(null, r.status), "No Sensor.Community sensor within 10 km; Open-Meteo works anywhere")
 })
 
 test("Sensor.Community survives garbage", () => {
@@ -84,7 +84,7 @@ test("Sensor.Community survives garbage", () => {
     const r = Sources.accept("sensorcommunity", {}, "sc-box", raw, KRAKOW, NOW)
     assert.equal(r.observation, null, raw)
   }
-  assert.match(Sources.accept("sensorcommunity", {}, "sc-box", "{", KRAKOW, NOW).status, /unexpected response/)
+  assert.match(Model.say(null, Sources.accept("sensorcommunity", {}, "sc-box", "{", KRAKOW, NOW).status), /unexpected response/)
 })
 
 test("Sensor.Community on the recorded Kraków box", () => {
@@ -179,7 +179,7 @@ test("GIOŚ: an all-null series is a status, not a zero", () => {
     "gios-index": JSON.stringify({ AqIndex: { "Wartość indeksu": null } })
   })
   assert.equal(r.observation, null)
-  assert.match(r.status, /no PM readings/)
+  assert.match(Model.say(null, r.status), /no PM readings/)
 })
 
 test("GIOŚ: a station without PM sensors falls through to the next one", () => {
@@ -200,7 +200,7 @@ test("GIOŚ: nothing within 30 km", () => {
   const far = { place: { name: "Sea", latitude: 55.5, longitude: 18.0 }, locker: "" }
   const r = Sources.accept("gios", {}, "gios-stations", fixture("gios-stations.json"), far, NOW)
   assert.equal(r.again, false)
-  assert.equal(r.status, "No GIOŚ station within 30 km")
+  assert.equal(Model.say(null, r.status), "No GIOŚ station within 30 km")
   assert.equal(Sources.plan("gios", r.state, far, NOW), null)
 })
 
@@ -224,7 +224,7 @@ test("InPost: a locker thousands of km away is not your air", () => {
   const far = fixture("shipx-nidzica.json").replace(/"distance":\s*\d+/g, '"distance": 6373552')
   const r = Sources.accept("inpost", {}, "nearby", far, newYork, NOW)
   assert.equal(r.observation, null)
-  assert.equal(r.status, "No InPost locker with an air sensor within 10 km")
+  assert.equal(Model.say(null, r.status), "No InPost locker with an air sensor within 10 km")
 })
 
 test("InPost: a pinned locker is looked up by code and never via the readings endpoint", () => {
@@ -238,7 +238,7 @@ test("InPost: a pinned locker is looked up by code and never via the readings en
   assert.match(r.observation.place, /^NID01BAPP/)
   for (let i = 0; i < 3; i++) assert.notEqual(Sources.plan("inpost", r.state, pinned, NOW).op, "air")
   const none = Sources.accept("inpost", {}, "point", JSON.stringify({ name: "KRA80M", air_index_level: null }), pinned, NOW)
-  assert.equal(none.status, "KRA80M has no air sensor")
+  assert.equal(Model.say(null, none.status), "KRA80M has no air sensor")
 })
 
 test("isFresh: within the source's own staleness window", () => {
@@ -313,7 +313,7 @@ test("GIOŚ: a manual station (HTTP 400 on its data) hands over to the next stat
   assert.equal(Sources.plan("gios", r.state, KRAKOW, NOW).op, "gios-sensors")
   const last = Sources.reject("gios", { stations: [two[0]], station: two[0], sensors: { pm10: [5744] }, cycle: ["pm10"] }, "gios-data", 400)
   assert.equal(last.again, false)
-  assert.match(last.status, /live PM/)
+  assert.match(Model.say(null, last.status), /live PM/)
   assert.equal(Sources.reject("gios", midCycle, "gios-data", 503), null, "a server error is an ordinary failure")
   assert.equal(Sources.reject("sensorcommunity", {}, "sc-box", 400), null)
 })

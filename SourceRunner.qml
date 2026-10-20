@@ -23,7 +23,8 @@ Item {
 
   property var state: ({})
   property var observation: null
-  property string status: ""
+  // "" or a Model.msg; the panel words it.
+  property var status: ""
   property int failures: 0
   property int lastHttp: 0
   // When the last request finished, whatever it brought: what opening the
@@ -33,7 +34,7 @@ Item {
   readonly property bool busy: proc.running
   readonly property var meta: Sources.info(sourceId)
 
-  signal reported(string sourceId, var state, var observation, string status)
+  signal reported(string sourceId, var state, var observation, var status)
 
   function publish() {
     reported(sourceId, state, observation, status)
@@ -191,7 +192,7 @@ Item {
       if (code !== 0 || overflow) {
         runner.failures++
         runner.lastHttp = Model.httpStatusIn(errors)
-        runner.status = overflow ? runner.meta.label + ": the answer exceeded its size limit"
+        runner.status = overflow ? Model.msg("fail.tooBig", "%1: the answer exceeded its size limit", [runner.meta.label])
           : Model.sourceFailure(runner.meta.label, code, errors)
         runner.publish()
         runner.schedule()

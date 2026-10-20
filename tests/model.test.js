@@ -62,12 +62,28 @@ test("pillLabel", () => {
 })
 
 test("sourceFailure names the source", () => {
-  assert.equal(Model.sourceFailure("GIOŚ", 22, "curl: (22) The requested URL returned error: 503"),
+  assert.equal(Model.say(null, Model.sourceFailure("GIOŚ", 22, "curl: (22) The requested URL returned error: 503")),
     "GIOŚ's server is failing (HTTP 503); trying again later")
-  assert.equal(Model.sourceFailure("Open-Meteo", 6, ""), "Cannot resolve Open-Meteo — is the network up?")
-  assert.equal(Model.sourceFailure("Sensor.Community", 28, ""), "Sensor.Community did not answer in time")
-  assert.equal(Model.sourceFailure("GIOŚ", 22, "returned error: 429"),
+  assert.equal(Model.say(null, Model.sourceFailure("Open-Meteo", 6, "")), "Cannot resolve Open-Meteo — is the network up?")
+  assert.equal(Model.say(null, Model.sourceFailure("Sensor.Community", 28, "")), "Sensor.Community did not answer in time")
+  assert.equal(Model.say(null, Model.sourceFailure("GIOŚ", 22, "returned error: 429")),
     "GIOŚ is limiting requests (HTTP 429); trying again later")
+})
+
+test("words: English without a translator, the translator's words with one", () => {
+  assert.equal(Model.fill("%1 of %2", ["a", 2]), "a of 2")
+  const m = Model.msg("x.y", "No locker called %1", ["KRA80M"])
+  assert.equal(m.text, "No locker called KRA80M")
+  assert.equal(Model.say(null, m), "No locker called KRA80M")
+  assert.equal(Model.say(null, "plain"), "plain")
+  const tr = {
+    t: (key, text, args) => Model.fill(key === "x.y" ? "Brak paczkomatu %1" : key === "level.polish.GOOD" ? "Dobry" : text, args),
+    tn: (key, n, one, other) => n === 1 ? one : other
+  }
+  assert.equal(Model.say(tr, m), "Brak paczkomatu KRA80M")
+  assert.equal(Model.levelInfo("GOOD", "polish", tr).label, "Dobry")
+  assert.equal(Model.levelInfo("GOOD", "polish", tr).color, Model.levelInfo("GOOD", "polish").color)
+  assert.equal(Model.relativeTime(1000, 61000 + 1000 * 60 * 2), "3 min ago")
 })
 
 test("keepOverride: an earlier write of ours landing late does not undo a later click", () => {

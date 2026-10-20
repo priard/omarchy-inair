@@ -29,6 +29,8 @@ Item {
   readonly property color levelColor: panel ? panel.levelInk : foreground
   readonly property string scale: panel ? panel.scale : "polish"
 
+  function t(key, text, args) { return panel ? panel.t(key, text, args) : Model.fill(text, args) }
+
   function ink(color) {
     return panel ? panel.ink(color) : color
   }
@@ -123,7 +125,7 @@ Item {
 
         ActionGlyph {
           glyph: "󰍉"
-          tip: "Search a place, postcode or locker code  [/]"
+          tip: view.t("action.search", "Search a place, postcode or locker code") + "  [/]"
           onActivated: if (view.panel) view.panel.openSettings(true)
         }
         // The scale is shown by name rather than by a swap icon: what the
@@ -131,26 +133,26 @@ Item {
         ActionGlyph {
           glyph: view.scale === "european" ? "EU" : "PL"
           tip: (view.scale === "european"
-            ? "European (EEA) index — click for Polish (GIOŚ)  [i]"
-            : "Polish (GIOŚ) index — click for European (EEA)  [i]")
-            + (view.indexOnly ? " · InPost's level is always Polish" : "")
+            ? view.t("action.scaleEea", "European (EEA) index — click for Polish (GIOŚ)")
+            : view.t("action.scaleGios", "Polish (GIOŚ) index — click for European (EEA)")) + "  [i]"
+            + (view.indexOnly ? " · " + view.t("action.inpostPolish", "InPost's level is always Polish") : "")
           on: true
           onActivated: if (view.panel) view.panel.cycleScale()
         }
         ActionGlyph {
           glyph: "󰒓"
-          tip: "Places and sources  [o]"
+          tip: view.t("action.settings", "Places and sources") + "  [o]"
           onActivated: if (view.panel) view.panel.openSettings(false)
         }
         ActionGlyph {
           glyph: "󰕮"
-          tip: "Switch to the plain skin  [s]"
+          tip: view.t("action.plainSkin", "Switch to the plain skin") + "  [s]"
           onActivated: if (view.panel) view.panel.cycleStyle()
         }
         ActionGlyph {
           id: refreshGlyph
           glyph: "󰑐"
-          tip: "Refresh every source  [r]"
+          tip: view.t("action.refresh", "Refresh every source") + "  [r]"
           dimmed: view.panel !== null && view.panel.busy
           spinning: dimmed
           onActivated: if (view.panel && !view.panel.busy) view.panel.refreshEverything()
@@ -209,7 +211,7 @@ Item {
         }
         Text {
           textFormat: Text.PlainText
-          text: view.panel ? view.panel.indexName : "GIOŚ INDEX"
+          text: view.panel ? view.panel.indexName : view.t("index.gios", "GIOŚ INDEX")
           color: view.dim
           font.family: view.fontFamily
           font.pixelSize: view.fontSize
@@ -282,7 +284,7 @@ Item {
     GridRow {
       visible: view.indexOnly
       segments: [
-        { text: Model.padRight("  InPost blocks its readings; this is its index only", view.inner), color: view.faint }
+        { text: Model.padRight("  " + view.t("panel.inpostIndexOnly", "InPost blocks its readings; this is its index only"), view.inner), color: view.faint }
       ]
     }
 
@@ -343,25 +345,25 @@ Item {
       }
 
       visible: trend.values.length >= 2
-      segments: [{ text: Model.padRight("TREND", 6) + " ", color: view.dim }]
+      segments: [{ text: Model.padRight(view.t("panel.trend", "TREND"), 6) + " ", color: view.dim }]
         .concat(cells)
         .concat([
           { text: Model.repeat(" ", sparkCells - line.length), color: view.dim },
-          { text: Model.padLeft(Model.spanLabel(trend.span), 13), color: view.dim }
+          { text: Model.padLeft(Model.spanLabel(trend.span, view.panel), 13), color: view.dim }
         ])
     }
 
     // ---- the locker doubles as a weather station
     GridLine {
       line: Model.frameSection(view.panel && view.panel.air && view.panel.air.kind === "model"
-        ? "WEATHER · FORECAST" : "STREET WEATHER", view.cols)
+        ? view.t("panel.weatherForecast", "WEATHER · FORECAST") : view.t("panel.weatherStreet", "STREET WEATHER"), view.cols)
       visible: view.hasWeather
     }
 
     Repeater {
       model: [
         { field: "temperature", label: "TEMP", unit: "°C", decimals: 1, band: 0.4 },
-        { field: "humidity", label: "RH", unit: "%", decimals: 0, band: 2 },
+        { field: "humidity", label: view.t("weather.rh", "RH"), unit: "%", decimals: 0, band: 2 },
         { field: "pressure", label: "hPa", unit: "", decimals: 0, band: 0.8 }
       ]
 
@@ -405,7 +407,7 @@ Item {
 
     // ---- every source, one line each; click or 1–4 to switch to it
     GridLine {
-      line: Model.frameSection("SOURCES", view.cols)
+      line: Model.frameSection(view.t("panel.sources", "SOURCES"), view.cols)
       visible: view.panel !== null && view.panel.cards.length > 1
     }
 
@@ -431,10 +433,10 @@ Item {
           readonly property string numbers: modelData.pm25 !== null
             ? "PM2.5 " + Model.formatValue(modelData.pm25, 0)
               + (modelData.pm10 !== null ? "  PM10 " + Model.formatValue(modelData.pm10, 0) : "")
-            : (modelData.level !== "" ? Model.levelInfo(modelData.level, modelData.scale).short
+            : (modelData.level !== "" ? Model.levelInfo(modelData.level, modelData.scale, view.panel).short
                : (modelData.status !== "" ? modelData.status : "…"))
           readonly property string age: modelData.at > 0 && view.panel
-            ? Model.relativeTime(modelData.at, view.panel.clock) : ""
+            ? Model.relativeTime(modelData.at, view.panel.clock, view.panel) : ""
           segments: [
             { text: modelData.shown ? "› " : "  ", color: view.levelColor },
             { text: "● ", color: modelData.level === "" ? view.faint
@@ -459,7 +461,7 @@ Item {
 
     // ---- which Sensor.Community sensors the median came from
     GridLine {
-      line: Model.frameSection("IN THE MEDIAN", view.cols)
+      line: Model.frameSection(view.t("panel.median", "IN THE MEDIAN"), view.cols)
       visible: view.panel !== null && view.panel.members.length > 0
     }
 
@@ -469,7 +471,7 @@ Item {
       GridRow {
         required property var modelData
         segments: [
-          { text: Model.padRight("  sensor site " + modelData.id, view.inner - 10), color: view.dim },
+          { text: Model.padRight("  " + view.t("panel.sensorSite", "sensor site %1", [modelData.id]), view.inner - 10), color: view.dim },
           { text: Model.padLeft(Model.formatDistance(modelData.distance), 10), color: view.dim }
         ]
       }
@@ -477,7 +479,7 @@ Item {
 
     // ---- sensors in range
     GridLine {
-      line: Model.frameSection("INPOST LOCKERS IN RANGE", view.cols)
+      line: Model.frameSection(view.t("panel.lockers", "INPOST LOCKERS IN RANGE"), view.cols)
       visible: view.panel !== null && view.panel.candidates.length > 0
     }
 
@@ -545,7 +547,7 @@ Item {
       GridRow {
         id: autoLine
         segments: [
-          { text: Model.padRight("  ↺ follow the nearest sensor", view.inner),
+          { text: Model.padRight("  ↺ " + view.t("panel.followNearest", "follow the nearest sensor"), view.inner),
             color: autoHover.containsMouse ? view.foreground : view.dim }
         ]
       }
@@ -571,7 +573,7 @@ Item {
 
     // ---- the shortcut legend, in the bottom rule's voice
     GridRow {
-      segments: [{ text: Model.padRight("/ find · o setup · 1-4 source · i s r", view.inner),
+      segments: [{ text: Model.padRight(view.t("panel.keys", "/ find · o setup · 1-4 source · i s r"), view.inner),
                    color: view.faint }]
     }
 

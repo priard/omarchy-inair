@@ -29,6 +29,8 @@ Item {
   readonly property string statusText: panel ? panel.statusText : ""
   readonly property bool busy: panel ? panel.busy : false
 
+  function t(key, text, args) { return panel ? panel.t(key, text, args) : Model.fill(text, args) }
+
   function tint(alpha) {
     return Qt.rgba(foreground.r, foreground.g, foreground.b, alpha)
   }
@@ -136,7 +138,7 @@ Item {
 
         PanelActionButton {
           iconText: "󰍉"
-          tooltipText: "Search a place, postcode or locker code  [/]"
+          tooltipText: view.t("action.search", "Search a place, postcode or locker code") + "  [/]"
           foreground: view.dim
           hoverColor: view.foreground
           fontFamily: view.fontFamily
@@ -149,8 +151,8 @@ Item {
           // said which way it would swap.
           iconText: view.scale === "european" ? "EU" : "PL"
           tooltipText: view.scale === "polish"
-            ? "Polish (GIOŚ) index — click for European (EEA)  [i]"
-            : "European (EEA) index — click for Polish (GIOŚ)  [i]"
+            ? view.t("action.scaleGios", "Polish (GIOŚ) index — click for European (EEA)") + "  [i]"
+            : view.t("action.scaleEea", "European (EEA) index — click for Polish (GIOŚ)") + "  [i]"
           foreground: view.levelColor
           hoverColor: view.foreground
           fontFamily: view.fontFamily
@@ -160,7 +162,7 @@ Item {
 
         PanelActionButton {
           iconText: "󰒓"
-          tooltipText: "Places and sources  [o]"
+          tooltipText: view.t("action.settings", "Places and sources") + "  [o]"
           foreground: view.dim
           hoverColor: view.foreground
           fontFamily: view.fontFamily
@@ -170,7 +172,7 @@ Item {
 
         PanelActionButton {
           iconText: "󰆍"
-          tooltipText: "Switch to the terminal skin  [s]"
+          tooltipText: view.t("action.terminalSkin", "Switch to the terminal skin") + "  [s]"
           foreground: view.dim
           hoverColor: view.foreground
           fontFamily: view.fontFamily
@@ -180,7 +182,7 @@ Item {
 
         PanelActionButton {
           iconText: "󰑐"
-          tooltipText: "Refresh every source  [r]"
+          tooltipText: view.t("action.refresh", "Refresh every source") + "  [r]"
           enabled: !view.busy
           foreground: view.busy ? view.faint : view.dim
           hoverColor: view.foreground
@@ -246,7 +248,7 @@ Item {
             }
             Text {
               textFormat: Text.PlainText
-              text: view.panel ? view.panel.indexName : "GIOŚ INDEX"
+              text: view.panel ? view.panel.indexName : view.t("index.gios", "GIOŚ INDEX")
               color: view.dim
               font.family: view.fontFamily
               font.pixelSize: Style.font.caption
@@ -333,7 +335,7 @@ Item {
         visible: view.indexOnly
         wrapMode: Text.WordWrap
         textFormat: Text.PlainText
-        text: "InPost blocks its readings; this is its index only."
+        text: view.t("panel.inpostIndexOnly", "InPost blocks its readings; this is its index only")
         color: view.faint
         font.family: view.fontFamily
         font.pixelSize: Style.font.caption
@@ -431,7 +433,7 @@ Item {
               textFormat: Text.PlainText
               text: {
                 var pct = view.air ? Model.normPercent(view.air.readings, modelData.field) : null
-                return pct === null ? "" : Model.formatValue(pct, 0) + "% of norm"
+                return pct === null ? "" : view.t("panel.ofNorm", "%1% of norm", [Model.formatValue(pct, 0)])
               }
               color: view.faint
               font.family: view.fontFamily
@@ -491,7 +493,7 @@ Item {
       Text {
         id: trendTitle
         textFormat: Text.PlainText
-        text: trendBox.byRank ? "INDEX TREND" : "PM2.5 TREND"
+        text: trendBox.byRank ? view.t("panel.indexTrend", "INDEX TREND") : view.t("panel.pmTrend", "PM2.5 TREND")
         color: view.dim
         font.family: view.fontFamily
         font.pixelSize: Style.font.caption
@@ -506,9 +508,9 @@ Item {
         text: {
           var i = trendBox.hoverIndex
           if (i < 0 || i >= trendBox.trend.values.length || trendBox.trend.values[i] === null)
-            return Model.spanLabel(trendBox.trend.span)
+            return Model.spanLabel(trendBox.trend.span, view.panel)
           return (trendBox.byRank
-              ? Model.levelInfo(trendBox.levels[i] || "", view.scale).label
+              ? Model.levelInfo(trendBox.levels[i] || "", view.scale, view.panel).label
               : Model.formatValue(trendBox.trend.values[i]) + " µg/m³") + " · "
             + Model.clockTime(Model.trendCellTime(trendBox.trend, i))
         }
@@ -596,7 +598,7 @@ Item {
           y: Math.round(trendBox.yAt(trendBox.norm)) - height - 1
           visible: !trendBox.byRank
           textFormat: Text.PlainText
-          text: "norm"
+          text: view.t("panel.norm", "norm")
           color: view.faint
           font.family: view.fontFamily
           font.pixelSize: Style.font.caption
@@ -737,7 +739,7 @@ Item {
       spacing: Style.space(4)
       visible: view.panel !== null && view.panel.cards.length > 1
 
-      PanelSectionHeader { text: "SOURCES"; foreground: view.dim; fontFamily: view.fontFamily }
+      PanelSectionHeader { text: view.t("panel.sources", "SOURCES"); foreground: view.dim; fontFamily: view.fontFamily }
 
       Repeater {
         model: view.panel ? view.panel.cards : []
@@ -777,8 +779,8 @@ Item {
               text: modelData.pm25 !== null
                 ? "PM2.5 " + Model.formatValue(modelData.pm25, 0)
                   + (modelData.pm10 !== null ? " · PM10 " + Model.formatValue(modelData.pm10, 0) : "")
-                : (modelData.level !== "" ? Model.levelInfo(modelData.level, modelData.scale).label
-                   : (modelData.status !== "" ? modelData.status : "waiting…"))
+                : (modelData.level !== "" ? Model.levelInfo(modelData.level, modelData.scale, view.panel).label
+                   : (modelData.status !== "" ? modelData.status : view.t("panel.waiting", "waiting…")))
               color: modelData.fresh ? view.foreground : view.faint
               font.family: view.fontFamily
               font.pixelSize: Style.font.bodySmall
@@ -792,7 +794,7 @@ Item {
             anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
             textFormat: Text.PlainText
-            text: modelData.at > 0 && view.panel ? Model.relativeTime(modelData.at, view.panel.clock) : ""
+            text: modelData.at > 0 && view.panel ? Model.relativeTime(modelData.at, view.panel.clock, view.panel) : ""
             color: view.dim
             font.family: view.fontFamily
             font.pixelSize: Style.font.caption
@@ -816,8 +818,8 @@ Item {
       wrapMode: Text.WordWrap
       textFormat: Text.PlainText
       visible: view.panel !== null && view.panel.members.length > 0
-      text: view.panel ? "Median of sites " + view.panel.members.map(function(m) {
-        return m.id + " (" + Model.formatDistance(m.distance) + ")" }).join(", ") : ""
+      text: view.panel ? view.t("panel.medianOf", "Median of sites %1", [view.panel.members.map(function(m) {
+        return m.id + " (" + Model.formatDistance(m.distance) + ")" }).join(", ")]) : ""
       color: view.faint
       font.family: view.fontFamily
       font.pixelSize: Style.font.caption
@@ -839,7 +841,7 @@ Item {
         PanelSectionHeader {
           anchors.left: parent.left
           anchors.verticalCenter: parent.verticalCenter
-          text: "INPOST LOCKERS IN RANGE"
+          text: view.t("panel.lockers", "INPOST LOCKERS IN RANGE")
           foreground: view.dim
           fontFamily: view.fontFamily
         }
@@ -849,7 +851,7 @@ Item {
           anchors.verticalCenter: parent.verticalCenter
           textFormat: Text.PlainText
           visible: view.pinnedCode !== ""
-          text: "󰜉 follow nearest"
+          text: "󰜉 " + view.t("panel.followNearestShort", "follow nearest")
           color: autoHover.containsMouse ? view.foreground : view.faint
           font.family: view.fontFamily
           font.pixelSize: Style.font.caption
@@ -973,7 +975,7 @@ Item {
       width: column.innerWidth
       wrapMode: Text.WordWrap
       textFormat: Text.PlainText
-      text: "Keys: / find · o settings · 1–4 source · i index · s skin · r refresh — right-click the pill for the index, middle-click to refresh"
+      text: view.t("panel.keysLong", "Keys: / find · o settings · 1–4 source · i index · s skin · r refresh — right-click the pill for the index, middle-click to refresh")
       color: view.faint
       font.family: view.fontFamily
       font.pixelSize: Style.font.caption

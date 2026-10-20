@@ -72,12 +72,15 @@ Item {
     else if (row.kind === "done") wizard ? panel.finishSetup() : panel.closeSettings()
   }
 
+  function t(key, text, args) { return panel ? panel.t(key, text, args) : Model.fill(text, args) }
+
   function placeLine() {
     if (!panel) return ""
-    if (panel.storedPlace) return "Reading around " + panel.storedPlace.name
+    if (panel.storedPlace) return t("setup.readingAround", "Reading around %1", [panel.storedPlace.name])
     if (panel.weatherPlace)
-      return "Reading around " + (panel.weatherPlace.name || "the Weather widget's location") + " (from Weather)"
-    return "No place yet"
+      return t("setup.readingAroundWeather", "Reading around %1 (from Weather)",
+        [panel.weatherPlace.name || t("setup.weatherLocation", "the Weather widget's location")])
+    return t("setup.noPlace", "No place yet")
   }
 
   // The row helpers can run once more while the view is being torn down,
@@ -86,23 +89,27 @@ Item {
     if (!panel) return ""
     if (row.kind === "result") return row.place.name + (row.place.detail ? " — " + row.place.detail : "")
     if (row.kind === "weather")
-      return "Use the Weather widget's location" + (panel.weatherPlace.name ? " (" + panel.weatherPlace.name + ")" : "")
+      return t("setup.useWeather", "Use the Weather widget's location")
+        + (panel.weatherPlace.name ? " (" + panel.weatherPlace.name + ")" : "")
     if (row.kind === "source") return Sources.info(row.id).label
-    if (row.kind === "scale") return "Index scale: " + (panel.scale === "european" ? "European (EEA)" : "Polish (GIOŚ)")
-    if (row.kind === "skin") return "Skin: " + (panel.style === "plain" ? "plain" : "terminal")
-    if (row.kind === "refresh") return "Refresh every " + panel.refreshMinutes + " min"
-    if (row.kind === "done") return wizard ? "Done" : "Close"
+    if (row.kind === "scale")
+      return t("setup.scale", "Index scale: %1", [panel.scale === "european"
+        ? t("setup.scaleEea", "European (EEA)") : t("setup.scaleGios", "Polish (GIOŚ)")])
+    if (row.kind === "skin")
+      return t("setup.skin", "Skin: %1", [panel.style === "plain" ? t("setup.skinPlain", "plain") : t("setup.skinTerminal", "terminal")])
+    if (row.kind === "refresh") return t("setup.refresh", "Refresh every %1 min", [panel.refreshMinutes])
+    if (row.kind === "done") return wizard ? t("setup.done", "Done") : t("setup.close", "Close")
     return ""
   }
 
   function rowDetail(row) {
     if (!panel) return ""
-    if (row.kind === "refresh") return "No source is asked more often than it updates"
+    if (row.kind === "refresh") return t("setup.refreshDetail", "No source is asked more often than it updates")
     if (row.kind !== "source") return ""
     var meta = Sources.info(row.id)
-    var sends = meta.hosts.length ? "sends your location (to ~100 m) to " + meta.hosts.join(", ")
-      : "never sends your location"
-    return meta.blurb + " · " + sends
+    var sends = meta.hosts.length ? t("setup.sends", "sends your location (to ~100 m) to %1", [meta.hosts.join(", ")])
+      : t("setup.sendsNothing", "never sends your location")
+    return t("source." + row.id + ".blurb", meta.blurb) + " · " + sends
   }
 
   function rowOn(row) {
@@ -123,7 +130,7 @@ Item {
 
     Text {
       textFormat: Text.PlainText
-      text: view.wizard ? "Set up inAir" : "inAir settings"
+      text: view.wizard ? view.t("setup.title", "Set up inAir") : view.t("setup.settings", "inAir settings")
       color: view.foreground
       font.family: view.fontFamily
       font.pixelSize: Style.font.subtitle
@@ -135,13 +142,13 @@ Item {
       wrapMode: Text.WordWrap
       textFormat: Text.PlainText
       visible: view.wizard
-      text: "Choose where to read the air and where the numbers come from. You can change both later with o."
+      text: view.t("setup.intro", "Choose where to read the air and where the numbers come from. You can change both later with o.")
       color: view.dim
       font.family: view.fontFamily
       font.pixelSize: Style.font.bodySmall
     }
 
-    PanelSectionHeader { text: "WHERE"; foreground: view.dim; fontFamily: view.fontFamily }
+    PanelSectionHeader { text: view.t("setup.where", "WHERE"); foreground: view.dim; fontFamily: view.fontFamily }
 
     Text {
       textFormat: Text.PlainText
@@ -154,7 +161,7 @@ Item {
     TextField {
       id: searchField
       width: parent.width
-      placeholderText: "Town, district or postcode — or a locker code with InPost chosen"
+      placeholderText: view.t("setup.searchHint", "Town, district or postcode — or a locker code with InPost chosen")
       foreground: view.foreground
       font.family: view.fontFamily
       maximumLength: 64
@@ -180,7 +187,7 @@ Item {
       width: parent.width
       wrapMode: Text.WordWrap
       textFormat: Text.PlainText
-      text: "Place names go to Open-Meteo's geocoder, postcodes and locker codes to InPost. What you type is not stored; the place you pick is."
+      text: view.t("setup.privacy", "Place names go to Open-Meteo's geocoder, postcodes and locker codes to InPost. What you type is not stored; the place you pick is.")
       color: view.faint
       font.family: view.fontFamily
       font.pixelSize: Style.font.caption
@@ -191,7 +198,7 @@ Item {
       wrapMode: Text.WordWrap
       textFormat: Text.PlainText
       visible: view.panel !== null && view.panel.placeStatus !== ""
-      text: view.panel ? view.panel.placeStatus : ""
+      text: view.panel ? view.panel.say(view.panel.placeStatus) : ""
       color: view.dim
       font.family: view.fontFamily
       font.pixelSize: Style.font.bodySmall
@@ -212,13 +219,13 @@ Item {
 
         PanelSectionHeader {
           visible: rowItem.modelData.kind === "source" && rowItem.modelData.id === view.sourceOrder[0]
-          text: "SOURCE — one at a time; Enter chooses, 1–4 switch from the readings"
+          text: view.t("setup.source", "SOURCE — one at a time; Enter chooses, 1–4 switch from the readings")
           foreground: view.dim
           fontFamily: view.fontFamily
         }
         PanelSectionHeader {
           visible: rowItem.modelData.kind === "scale"
-          text: "OPTIONS"
+          text: view.t("setup.options", "OPTIONS")
           foreground: view.dim
           fontFamily: view.fontFamily
         }
@@ -283,7 +290,7 @@ Item {
                 wrapMode: Text.WordWrap
                 textFormat: Text.PlainText
                 text: rowItem.modelData.kind === "done" && !view.canFinish
-                  ? "Choose a place and a source first" : view.rowDetail(rowItem.modelData)
+                  ? view.t("setup.needPlace", "Choose a place and a source first") : view.rowDetail(rowItem.modelData)
                 color: view.faint
                 font.family: view.fontFamily
                 font.pixelSize: Style.font.caption

@@ -4,6 +4,17 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] — 2026-10-20
+
+### Added
+
+- **Polish.** inAir follows the language Omarchy is set to, through the
+  translations Omarchy 4.5 gives plugins, and switches with it without a
+  restart. English stays the default and the fallback for any missing
+  string; on an older Omarchy everything stays in English.
+- `i18n/en.json` and `i18n/pl.json`, and a test that keeps the English
+  catalog equal to the strings in the code and every translation complete.
+
 ## [0.9.0] — 2026-10-19
 
 ### Added

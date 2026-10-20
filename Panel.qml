@@ -142,6 +142,35 @@ Panel {
   readonly property var context: ({ place: place, locker: pinnedCode })
   readonly property string contextKey: JSON.stringify(context)
 
+  // ------------------------------------------------------------ language
+
+  // Omarchy 4.5 added Commons.Translations; looked up at run time, so an older
+  // shell simply has none and every string stays in English. It follows
+  // ~/.config/omarchy/language and re-reads i18n/ on a switch, and every
+  // binding that called t() re-evaluates with it.
+  property var i18n: null
+
+  function t(key, text, args) {
+    return Model.fill(i18n ? i18n.t(key, text) : text, args)
+  }
+
+  function tn(key, count, one, other, args) {
+    var english = count === 1 ? one : other
+    return Model.fill(i18n ? i18n.tn(key, count, english) : english, [count].concat(args || []))
+  }
+
+  function say(message) { return Model.say(root, message) }
+
+  Component.onCompleted: {
+    try {
+      i18n = Qt.createQmlObject("import qs.Commons as Commons\nCommons.Translations {}", root, "inair-i18n")
+      i18n.directory = Qt.resolvedUrl("i18n")
+    } catch (e) {
+      i18n = null
+    }
+    readWeather()
+  }
+
   // ---------------------------------------------------------------- state
 
   property var observations: ({})
@@ -150,8 +179,9 @@ Panel {
   property bool settingsOpen: false
   property bool searching: false
   property var placeResults: []
-  property string placeStatus: ""
-  property string panelStatus: ""
+  // "" or a Model.msg, worded when shown.
+  property var placeStatus: ""
+  property var panelStatus: ""
 
   // Ticks so freshness and "3 min ago" move on without a new reading.
   property double clock: Date.now()
@@ -186,9 +216,9 @@ Panel {
   }
 
   readonly property string levelScale: scaleFor(air)
-  readonly property string indexName: levelScale === "european" ? "EEA INDEX" : "GIOŚ INDEX"
+  readonly property string indexName: levelScale === "european" ? t("index.eea", "EEA INDEX") : t("index.gios", "GIOŚ INDEX")
   readonly property string levelKey: Model.effectiveLevel(air, levelScale)
-  readonly property var levelMeta: Model.levelInfo(levelKey, levelScale)
+  readonly property var levelMeta: Model.levelInfo(levelKey, levelScale, root)
 
   readonly property color levelColor: Model.levelInfo(
     Model.effectiveLevel(primaryObservation, scaleFor(primaryObservation)), scaleFor(primaryObservation)).color
@@ -198,20 +228,20 @@ Panel {
   // always be opened.
   readonly property bool hasReading: !setupNeeded && primaryObservation !== null
     && (Model.pillText(primaryObservation) !== "" || primaryObservation.level !== "")
-  readonly property string label: Model.pillLabel(setupNeeded ? null : primaryObservation, setupNeeded)
+  readonly property string label: Model.pillLabel(setupNeeded ? null : primaryObservation, setupNeeded, root)
 
-  readonly property var shownDescription: Sources.describe(air, clock)
+  readonly property var shownDescription: Sources.describe(air, clock, root)
   readonly property string sourceTitle: air ? shownDescription.title
     : (shownId !== "" ? Sources.info(shownId).label : (sources.length ? Sources.info(sources[0]).label : ""))
-  readonly property string sourceDetail: air ? shownDescription.detail : (busy ? "looking…" : "no data yet")
+  readonly property string sourceDetail: air ? shownDescription.detail : (busy ? t("panel.looking", "looking…") : t("panel.noData", "no data yet"))
 
-  readonly property string attributionText: Sources.attribution(sources)
+  readonly property string attributionText: Sources.attribution(sources, root)
 
   readonly property string statusText: {
-    if (panelStatus !== "") return panelStatus
-    if (shownId !== "" && statuses[shownId]) return statuses[shownId]
+    if (panelStatus !== "") return say(panelStatus)
+    if (shownId !== "" && statuses[shownId]) return say(statuses[shownId])
     if (air) return ""
-    for (var i = 0; i < sources.length; i++) if (statuses[sources[i]]) return statuses[sources[i]]
+    for (var i = 0; i < sources.length; i++) if (statuses[sources[i]]) return say(statuses[sources[i]])
     return ""
   }
 
@@ -219,11 +249,11 @@ Panel {
   // markup and capped: the bar renders tooltips with a format this plugin
   // cannot pin to PlainText.
   readonly property string tooltip: {
-    if (setupNeeded) return "inAir — click to set up"
+    if (setupNeeded) return t("tooltip.setup", "inAir — click to set up")
     var o = primaryObservation
-    if (!o) return statusText !== "" ? Model.plain(statusText, 160) : "inAir — no data yet"
-    var d = Sources.describe(o, clock)
-    var line = Model.levelInfo(Model.effectiveLevel(o, scaleFor(o)), scaleFor(o)).label
+    if (!o) return statusText !== "" ? Model.plain(statusText, 160) : t("tooltip.noData", "inAir — no data yet")
+    var d = Sources.describe(o, clock, root)
+    var line = Model.levelInfo(Model.effectiveLevel(o, scaleFor(o)), scaleFor(o), root).label
     var pm25 = Model.value(o.readings, "pm25")
     var pm10 = Model.value(o.readings, "pm10")
     if (pm25 !== null) line += " · PM2.5 " + Model.formatValue(pm25)
@@ -251,7 +281,7 @@ Panel {
         distance: o ? o.distance : null,
         at: o ? o.at : 0,
         fresh: Sources.isFresh(o, clock),
-        status: chosen ? (statuses[id] || "") : Sources.info(id).hint,
+        status: chosen ? say(statuses[id]) : t("source." + id + ".hint", Sources.info(id).hint),
         shown: chosen
       })
     }
@@ -497,9 +527,9 @@ Panel {
     var s = Sources.copy(states, null)
     s[id] = state
     states = s
-    var t = Sources.copy(statuses, null)
-    t[id] = status
-    statuses = t
+    var st = Sources.copy(statuses, null)
+    st[id] = status
+    statuses = st
     var o = Sources.copy(observations, null)
     if (observation) o[id] = observation
     else delete o[id]
@@ -614,15 +644,15 @@ Panel {
     }
     if (Sources.looksLikeLockerCode(typed)) {
       if (sources.indexOf("inpost") < 0) {
-        placeStatus = "That looks like a locker code; choose InPost to pin a locker."
+        placeStatus = Model.msg("place.lockerCode", "That looks like a locker code; choose InPost to pin a locker.")
         return
       }
       pinLocker(typed.toUpperCase())
-      placeStatus = "Pinned InPost locker " + typed.toUpperCase()
+      placeStatus = Model.msg("place.pinned", "Pinned InPost locker %1", [typed.toUpperCase()])
       return
     }
     if (typed.length > 64) {
-      placeStatus = "That is too long for a place name"
+      placeStatus = Model.msg("place.tooLong", "That is too long for a place name")
       return
     }
     geocodeProc.query = typed
@@ -655,7 +685,6 @@ Panel {
     if (JSON.stringify(next) !== JSON.stringify(weatherPlace)) weatherPlace = next
   }
 
-  Component.onCompleted: readWeather()
 
   Component.onDestruction: {
     locationProc.signal(15)
@@ -779,8 +808,8 @@ Panel {
       var found = code === 0 ? Sources.parsePlaces(geocodeProc.buffer) : []
       geocodeProc.buffer = ""
       root.placeResults = found
-      root.placeStatus = code !== 0 ? "Could not reach the geocoder"
-        : (found.length === 0 ? "No place called " + Model.plain(geocodeProc.query, 48) : "")
+      root.placeStatus = code !== 0 ? Model.msg("place.geocoderDown", "Could not reach the geocoder")
+        : (found.length === 0 ? Model.msg("place.none", "No place called %1", [Model.plain(geocodeProc.query, 48)]) : "")
     }
   }
 
@@ -819,8 +848,8 @@ Panel {
       postcodeProc.buffer = ""
       // curl exits 22 on an HTTP error, which is how ShipX answers a postcode
       // it does not know.
-      if (code === 22) root.placeStatus = "InPost does not know the postcode " + postcodeProc.postcode
-      else if (!found) root.placeStatus = "Could not place the postcode " + postcodeProc.postcode
+      if (code === 22) root.placeStatus = Model.msg("place.postcodeUnknown", "InPost does not know the postcode %1", [postcodeProc.postcode])
+      else if (!found) root.placeStatus = Model.msg("place.postcodeFailed", "Could not place the postcode %1", [postcodeProc.postcode])
       else root.placeResults = [found]
     }
   }
