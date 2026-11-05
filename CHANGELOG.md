@@ -4,6 +4,12 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.10.1] — 2026-11-05
+
+### Fixed
+
+- The panel opens under the pill instead of centred on the bar.
+
 ## [0.10.0] — 2026-10-20
 
 ### Added
