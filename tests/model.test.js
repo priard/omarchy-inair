@@ -125,3 +125,10 @@ test("pillAlerts: the pill takes the index colour from Moderate up, not for good
   assert.equal(alerts("EXTREMELY_POOR", "european"), true)
   assert.equal(alerts("", "european"), false, "no index, no alarm colour")
 })
+
+test("backdropFor: over a transparent bar the backdrop is the opposite of the text colour the bar picked", () => {
+  // Omarchy picks the bar text between the theme's text and background colours
+  // by the wallpaper; the wallpaper is then closer to the one it did not pick.
+  assert.equal(Model.backdropFor("#ffffff", "#202020", "#f0f0f0"), "#202020")
+  assert.equal(Model.backdropFor("#202020", "#202020", "#f0f0f0"), "#f0f0f0")
+})

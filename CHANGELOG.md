@@ -11,6 +11,9 @@ All notable changes to this plugin. The format follows
 - The pill keeps the bar's text colour while the air is good and takes the
   index colour only from Moderate up, at a stronger 4.5:1 contrast, so it no
   longer blends into a light or translucent bar.
+- The pill follows the text colour the bar picks for its own icons. On a
+  transparent bar Omarchy switches that colour to suit the wallpaper, and the
+  pill used to stay on the theme's text colour, dark next to white icons.
 
 ## [0.10.1] — 2026-11-05
 

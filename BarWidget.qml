@@ -57,7 +57,11 @@ BarWidget {
   readonly property string label: panelLoader.item ? String(panelLoader.item.label) : ""
   // Color is always qualified as Commons.Color: unqualified, the name does not
   // resolve to the shell's palette in a plugin.
-  readonly property color barText: Commons.Color.bar.text
+  // The bar's own widgets draw in bar.barForeground: over a transparent bar
+  // Omarchy flips it between the theme's text and background colours to suit
+  // the wallpaper, so Color.bar.text alone can be dark next to white icons.
+  readonly property color barText: root.bar && root.bar.barForeground !== undefined
+    ? root.bar.barForeground : Commons.Color.bar.text
   readonly property color barBackground: Commons.Color.bar.background
 
   readonly property color levelColor: panelLoader.item
@@ -67,8 +71,9 @@ BarWidget {
   // is whatever the theme makes it. Keep the hue and walk the colour toward
   // black or white just far enough to read against the bar actually behind it.
   // A mostly transparent bar sits over the wallpaper, which the plugin cannot
-  // see, so it is judged against the theme background instead.
-  readonly property color barSurface: barBackground.a >= 0.5 ? barBackground : Commons.Color.background
+  // see; it is judged against the theme colour the bar's text was not set to.
+  readonly property color barSurface: barBackground.a >= 0.5 ? barBackground
+    : Model.backdropFor(barText, Commons.Color.background, Commons.Color.bar.text)
 
   readonly property bool hasReading: panelLoader.item ? panelLoader.item.hasReading === true : false
 

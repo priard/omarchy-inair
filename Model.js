@@ -757,6 +757,14 @@ function contrastRatio(a, b) {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
 }
 
+// Of two candidate backdrops, the one the text colour stands out against.
+// A transparent Omarchy bar picks its text between the theme's text and
+// background colours by looking at the wallpaper, so the wallpaper behind it
+// is closer to whichever colour it did not pick.
+function backdropFor(foreground, a, b) {
+  return contrastRatio(foreground, a) >= contrastRatio(foreground, b) ? a : b
+}
+
 function mix(a, b, t) {
   var x = rgbOf(a)
   var y = rgbOf(b)
@@ -1164,6 +1172,7 @@ if (typeof module !== "undefined") {
     rgbOf: rgbOf,
     hexOf: hexOf,
     contrastRatio: contrastRatio,
+    backdropFor: backdropFor,
     readable: readable,
     tone: tone,
     temperatureColor: temperatureColor,
