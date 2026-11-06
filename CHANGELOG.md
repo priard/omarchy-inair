@@ -4,6 +4,14 @@ All notable changes to this plugin. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- The pill keeps the bar's text colour while the air is good and takes the
+  index colour only from Moderate up, at a stronger 4.5:1 contrast, so it no
+  longer blends into a light or translucent bar.
+
 ## [0.10.1] — 2026-11-05
 
 ### Fixed

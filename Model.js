@@ -141,6 +141,14 @@ function canonicalLevel(level) {
   return LEVEL_ALIASES[key] || key
 }
 
+// The bar shows the index colour only once it is a warning (Moderate and
+// up on both scales). Good air takes the bar's own text colour, so the pill
+// sits with the other icons instead of a pale index green or cyan that
+// blends into a light or translucent bar.
+function pillAlerts(info) {
+  return !!info && info.rank >= 3
+}
+
 function levelInfo(level, scale, tr) {
   var named = String(scale || "polish") === "european" ? "european" : "polish"
   var key = canonicalLevel(level)
@@ -1118,6 +1126,7 @@ if (typeof module !== "undefined") {
     plain: plain,
     finiteOr: finiteOr,
     levelInfo: levelInfo,
+    pillAlerts: pillAlerts,
     parseSensorLine: parseSensorLine,
     parseAirResponse: parseAirResponse,
     reading: reading,

@@ -10,7 +10,7 @@ import "Sources.js" as Sources
 
 // All of the plugin's state lives here: where the user is, which sources are
 // enabled and in what order, what each one last reported, and which one the
-// pill shows. The bar widget above renders `label`, `levelColor` and
+// pill shows. The bar widget above renders `label`, `levelColor`, `levelAlerts` and
 // `tooltip` and nothing else.
 //
 // Nothing is fetched directly. Each source runs in its own SourceRunner on
@@ -220,8 +220,10 @@ Panel {
   readonly property string levelKey: Model.effectiveLevel(air, levelScale)
   readonly property var levelMeta: Model.levelInfo(levelKey, levelScale, root)
 
-  readonly property color levelColor: Model.levelInfo(
-    Model.effectiveLevel(primaryObservation, scaleFor(primaryObservation)), scaleFor(primaryObservation)).color
+  readonly property var shownLevel: Model.levelInfo(
+    Model.effectiveLevel(primaryObservation, scaleFor(primaryObservation)), scaleFor(primaryObservation))
+  readonly property color levelColor: shownLevel.color
+  readonly property bool levelAlerts: Model.pillAlerts(shownLevel)
 
   // The pill is always there, reading or not: a gear before setup, a dash
   // while nothing has answered, so the panel that says what is missing can

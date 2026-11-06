@@ -72,11 +72,15 @@ BarWidget {
 
   readonly property bool hasReading: panelLoader.item ? panelLoader.item.hasReading === true : false
 
-  // Without a reading the pill keeps the bar's own text colour, dimmed: there
-  // is no index to colour it by, and a coloured dash would claim one.
-  readonly property color pillColor: hasReading
-    ? Model.readable(levelColor, barSurface, 3.5)
-    : Qt.rgba(barText.r, barText.g, barText.b, 0.55)
+  readonly property bool levelAlerts: panelLoader.item ? panelLoader.item.levelAlerts === true : false
+
+  // Good air keeps the bar's own text colour, like the icons next to it; the
+  // index colour appears only from Moderate up, where it means "look", and
+  // at 4.5:1 so it still reads over a translucent bar. Without a reading the
+  // pill is dimmed: there is no index, and a coloured dash would claim one.
+  readonly property color pillColor: !hasReading
+    ? Qt.rgba(barText.r, barText.g, barText.b, 0.55)
+    : levelAlerts ? Model.readable(levelColor, barSurface, 4.5) : barText
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight

@@ -126,12 +126,14 @@ with `omarchy bar set priard.inair …`.
 
 ## Usage
 
-The pill shows PM2.5 in µg/m³, coloured by the air quality index:
+The pill shows PM2.5 in µg/m³. While the air is good (Very good or Good on
+the Polish index, Good or Fair on the European one) it takes the bar's own
+text colour, like the icons next to it. From Moderate up it takes the index
+colour, so a colour on the bar always means "worth a look":
 
 | Colour | Polish index (GIOŚ) | European index (EEA) |
 |---|---|---|
-| green / cyan | Very good | Good |
-| light green / teal | Good | Fair |
+| bar text | Very good, Good | Good, Fair |
 | yellow | Moderate | Moderate |
 | orange / red | Sufficient | Poor |
 | red / crimson | Bad | Very poor |
@@ -139,8 +141,9 @@ The pill shows PM2.5 in µg/m³, coloured by the air quality index:
 
 The colours are the official ones, adjusted to stay readable on your theme.
 Each one keeps its hue but is darkened or lightened just enough to reach a
-minimum contrast against the actual bar and panel background, so GIOŚ yellow
-on a light theme and its maroon on a dark one no longer disappear.
+4.5:1 contrast against the bar, so GIOŚ yellow on a light theme and its
+maroon on a dark one do not disappear. The panel shows the full scale in its
+official colours.
 
 - **Left-click** opens the panel.
 - **Right-click** switches between the Polish (GIOŚ) and European (EEA) index.
